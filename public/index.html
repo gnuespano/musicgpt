@@ -1,0 +1,444 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>MusicGPT — estúdio pessoal de criação musical com IA</title>
+<meta name="description" content="Transforme qualquer ideia em uma música totalmente produzida com letra, vocais e instrumentais em poucos segundos." />
+<link rel="manifest" href="/manifest.json" />
+<meta name="theme-color" content="#0a0a0f" />
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="MusicGPT" />
+<meta name="color-scheme" content="dark" />
+<link rel="icon" href="/icons/icon-32.png" sizes="32x32" type="image/png" />
+<link rel="icon" href="/icons/icon-192.png" sizes="192x192" type="image/png" />
+<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+<link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+<div class="app" id="app">
+
+  <!-- ================= SIDEBAR ================= -->
+  <aside class="sidebar" id="sidebar">
+    <div class="brand">
+      <div class="brand-mark">M</div>
+      <div class="brand-text">
+        <strong>MusicGPT</strong>
+        <span>estúdio de IA</span>
+      </div>
+    </div>
+
+    <nav class="nav" id="nav">
+      <button class="nav-item is-active" data-view="criar"><span class="ico"><svg viewBox="0 0 24 24"><path d="M12 2l1.8 5.4L19 9.2l-5.2 1.8L12 16.4l-1.8-5.4L5 9.2l5.2-1.8zM19 15l.9 2.6 2.6.9-2.6.9-.9 2.6-.9-2.6-2.6-.9 2.6-.9z"/></svg></span> <span class="lbl">Criar</span></button>
+      <button class="nav-item" data-view="letras"><span class="ico"><svg viewBox="0 0 24 24"><path d="M3 17.2V21h3.8L17.8 10 14 6.2zM20.7 7.1a1 1 0 0 0 0-1.4l-2.4-2.4a1 1 0 0 0-1.4 0L15 5.1 18.9 9z"/></svg></span> <span class="lbl">Gerador de letras</span></button>
+      <button class="nav-item" data-view="biblioteca"><span class="ico"><svg viewBox="0 0 24 24"><path d="M3 3h8v8H3zm10 0h8v8h-8zM3 13h8v8H3zm10 0h8v8h-8z"/></svg></span> <span class="lbl">Biblioteca</span></button>
+      <button class="nav-item" data-view="playlists"><span class="ico"><svg viewBox="0 0 24 24"><path d="M3 5h12v2H3zm0 4h12v2H3zm0 4h8v2H3zm14-6 5 3-5 3z"/></svg></span> <span class="lbl">Playlists</span></button>
+      <button class="nav-item" data-view="modelo"><span class="ico"><svg viewBox="0 0 24 24"><path d="M12 2l9 10-9 10-9-10z"/></svg></span> <span class="lbl">Meu modelo</span></button>
+      <button class="nav-item" data-view="explorar"><span class="ico"><svg viewBox="0 0 24 24"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm3.5 6.5-2 5-5 2 2-5z"/></svg></span> <span class="lbl">Explorar</span></button>
+    </nav>
+
+    <div class="sidebar-foot">
+      <button class="install-btn" id="btnInstall" hidden type="button">
+        <svg viewBox="0 0 24 24"><path d="M12 3v10l4-4 1.4 1.4L12 16.8 6.6 9.4 8 8l4 4zM4 19h16v2H4z"/></svg>
+        <span id="installLabel">Instalar app</span>
+      </button>
+      <div class="profile-chip" id="profileChip">
+        <div class="avatar" id="profileAvatar">E</div>
+        <div class="profile-meta">
+          <strong id="profileName">Estúdio</strong>
+          <span id="profileProvider">local</span>
+        </div>
+        <span class="offline-badge" id="offlineBadge" hidden>offline</span>
+      </div>
+    </div>
+  </aside>
+
+  <!-- ================= MAIN ================= -->
+  <main class="main" id="main">
+
+    <!-- ---------- CRIAR ---------- -->
+    <section class="view is-active" data-view="criar">
+      <header class="view-head">
+        <div>
+          <h1>Criar música com IA</h1>
+          <p class="sub">Descreva a ideia. O estúdio escreve a letra, compõe, toca e canta.</p>
+        </div>
+      </header>
+
+      <div class="create-grid">
+        <div class="panel panel-prompt">
+          <div class="row row-quick">
+            <button class="btn btn-ghost" id="btnAddAudio" type="button" disabled title="Em breve">
+              <svg viewBox="0 0 24 24"><path d="M14 3v11.2a3.5 3.5 0 1 1-2-3.16V5.6L6 7v9.2a3.5 3.5 0 1 1-2-3.16V5z"/></svg>
+              Áudio
+            </button>
+            <button class="btn btn-ghost" id="btnAddVoice" type="button">
+              <svg viewBox="0 0 24 24"><path d="M12 14a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v5a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.9V21h2v-3.1A7 7 0 0 0 19 11z"/></svg>
+              <span id="addVoiceLabel">Voz</span>
+            </button>
+          </div>
+
+          <!-- ---------- LETRA ---------- -->
+          <section class="block">
+            <div class="block-head">
+              <button class="block-toggle" id="toggleLyrics" type="button">
+                <svg class="caret" viewBox="0 0 24 24"><path d="M7 10l5 5 5-5z"/></svg>
+                Letra
+              </button>
+              <button class="icon-btn wand" id="btnLyricWand" type="button" title="Gerar letra com IA">
+                <svg viewBox="0 0 24 24"><path d="M4 20l10.5-10.5-3-3L1 17v3h3zm14.7-12.3 1.4-1.4a1 1 0 0 0 0-1.4l-1.6-1.6a1 1 0 0 0-1.4 0l-1.4 1.4 2.6 2.6 1.4-1.4zM12 2l1.1 2.9L16 6l-2.9 1.1L12 10l-1.1-2.9L8 6l2.9-1.1L12 2z"/></svg>
+              </button>
+            </div>
+            <div class="block-body" id="bodyLyrics">
+              <textarea id="customLyrics" rows="5" placeholder="Escreva a letra de uma música ou uma sugestão."></textarea>
+              <div class="row">
+                <label class="switch">
+                  <input type="checkbox" id="instrumental" />
+                  <span class="switch-track"><span class="switch-thumb"></span></span>
+                  <span class="switch-label">Instrumental</span>
+                </label>
+                <button class="btn btn-ghost btn-sm" id="btnClearLyrics" type="button">Limpar</button>
+              </div>
+            </div>
+          </section>
+
+          <!-- ---------- ESTILOS ---------- -->
+          <section class="block">
+            <div class="block-head">
+              <button class="block-toggle" id="toggleStyles" type="button">
+                <svg class="caret" viewBox="0 0 24 24"><path d="M7 10l5 5 5-5z"/></svg>
+                Estilos
+              </button>
+              <button class="icon-btn wand" id="btnStyleWand" type="button" title="Sugerir um estilo">
+                <svg viewBox="0 0 24 24"><path d="M4 20l10.5-10.5-3-3L1 17v3h3zm14.7-12.3 1.4-1.4a1 1 0 0 0 0-1.4l-1.6-1.6a1 1 0 0 0-1.4 0l-1.4 1.4 2.6 2.6 1.4-1.4zM12 2l1.1 2.9L16 6l-2.9 1.1L12 10l-1.1-2.9L8 6l2.9-1.1L12 2z"/></svg>
+              </button>
+            </div>
+            <div class="block-body" id="bodyStyles">
+              <textarea id="prompt" rows="5" placeholder="Descreva como você quer que sua música soe."></textarea>
+              <div class="chips" id="genreChips" role="group" aria-label="Gênero"></div>
+              <div class="row row-2">
+                <label class="field">
+                  <span class="field-label">Clima</span>
+                  <select id="mood"></select>
+                </label>
+                <label class="field">
+                  <span class="field-label">Caráter da voz</span>
+                  <select id="voice"></select>
+                </label>
+              </div>
+            </div>
+          </section>
+
+          <!-- ---------- MAIS OPÇÕES ---------- -->
+          <section class="block">
+            <div class="block-head">
+              <button class="block-toggle" id="toggleMore" type="button">
+                <svg class="caret" viewBox="0 0 24 24"><path d="M7 10l5 5 5-5z"/></svg>
+                Mais opções
+              </button>
+            </div>
+            <div class="block-body" id="bodyMore">
+              <label class="field">
+                <span class="field-label">Variedade <b id="varietyValue">Normal</b></span>
+                <input type="range" id="variety" min="0" max="100" step="5" value="50" />
+                <div class="variety-scale" id="varietyScale"></div>
+              </label>
+
+              <div class="row row-2">
+                <label class="field">
+                  <span class="field-label">Duração <b id="durationValue">75s</b></span>
+                  <input type="range" id="duration" min="25" max="120" step="5" value="75" />
+                </label>
+                <label class="field">
+                  <span class="field-label">Título da música</span>
+                  <input type="text" id="title" placeholder="Deixe vazio para a IA criar" />
+                </label>
+              </div>
+
+              <label class="switch">
+                <input type="checkbox" id="lofi" />
+                <span class="switch-track"><span class="switch-thumb"></span></span>
+                <span class="switch-label">Lo-fi <span class="hint">chuva ambiente — ruído branco filtrado em segundo plano</span></span>
+              </label>
+            </div>
+          </section>
+
+          <button class="btn btn-primary btn-xl" id="btnGenerate" type="button">
+            <span class="btn-glyph">✦</span> Criar
+          </button>
+          <p class="fineprint">Geração local por síntese procedural. Com chaves de API configuradas o app usa modelos remotos de música com vocal real.</p>
+        </div>
+
+        <div class="panel panel-status" id="statusPanel">
+          <div class="status-empty" id="statusEmpty">
+            <div class="orb"></div>
+            <h3>Nenhuma geração em andamento</h3>
+            <p>Escreva um prompt e toque em <b>Criar</b>. O progresso aparece aqui em tempo real.</p>
+          </div>
+
+          <div class="status-running" id="statusRunning" hidden>
+            <div class="status-head">
+              <span class="status-stage" id="jobStage">preparando</span>
+              <span class="status-pct" id="jobPct">0%</span>
+            </div>
+            <div class="progress"><div class="progress-bar" id="jobBar"></div></div>
+            <div class="eq" id="eq"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+            <p class="status-detail" id="jobDetail"></p>
+            <button class="btn btn-ghost" id="btnCancelJob" type="button">Cancelar</button>
+          </div>
+
+          <div class="status-done" id="statusDone" hidden>
+            <h3 id="doneTitle">Faixa pronta</h3>
+            <div class="done-card" id="doneCard"></div>
+            <div class="row">
+              <button class="btn btn-primary" id="btnPlayDone" type="button"><svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg> Ouvir agora</button>
+              <button class="btn btn-ghost" id="btnDownloadDone" type="button"><svg viewBox="0 0 24 24"><path d="M3 10h2v4H3zm4-4h2v12H7zm4-3h2v18h-2zm4 5h2v8h-2zm4 2h2v4h-2z"/></svg> Baixar .wav</button>
+              <button class="btn btn-ghost" id="btnOpenDone" type="button">Abrir na biblioteca</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ---------- LETRAS ---------- -->
+    <section class="view" data-view="letras">
+      <header class="view-head">
+        <div>
+          <h1>Gerador de letras</h1>
+          <p class="sub">Letra completa instantânea ou colaboração linha por linha.</p>
+        </div>
+      </header>
+
+      <div class="create-grid">
+        <div class="panel">
+          <label class="field-label" for="lyricsPrompt">Tema da música</label>
+          <textarea id="lyricsPrompt" rows="3" placeholder="Ex.: saudade de uma casa antiga no fim de tarde"></textarea>
+          <div class="row row-2">
+            <label class="field">
+              <span class="field-label">Idioma</span>
+              <select id="lyricsLang">
+                <option value="pt">Português</option>
+                <option value="en">English</option>
+              </select>
+            </label>
+            <label class="field">
+              <span class="field-label">Estilo</span>
+              <select id="lyricsStyle">
+                <option value="pop">Pop</option>
+                <option value="mpb">MPB</option>
+                <option value="trap">Trap</option>
+                <option value="sertanejo">Sertanejo</option>
+                <option value="samba">Samba</option>
+                <option value="rock">Rock</option>
+              </select>
+            </label>
+          </div>
+          <div class="row">
+            <button class="btn btn-primary" id="btnLyricsFull" type="button">Gerar letra completa</button>
+            <button class="btn btn-ghost" id="btnLyricsNext" type="button">Próxima linha</button>
+          </div>
+          <p class="fineprint">Tags estruturais em inglês: <code>[Verse]</code>, <code>[Pre-Chorus]</code>, <code>[Chorus]</code>, <code>[Bridge]</code>, <code>[Outro]</code>.</p>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head">
+            <h3>Editor</h3>
+            <div class="row">
+              <button class="btn btn-ghost btn-sm" id="btnCopyLyrics" type="button">Copiar</button>
+              <button class="btn btn-ghost btn-sm" id="btnUseLyrics" type="button">Usar na criação →</button>
+            </div>
+          </div>
+          <textarea id="lyricsEditor" rows="18" placeholder="A letra aparece aqui. Edite livremente, collaborate linha a linha e envie para o estúdio."></textarea>
+          <div class="collab" id="collabBox">
+            <div class="collab-head">
+              <strong>Colaborar linha a linha</strong>
+              <span id="collabCount">0 linhas</span>
+            </div>
+            <div class="collab-lines" id="collabLines"></div>
+            <button class="btn btn-ghost btn-sm" id="btnCollabAdd" type="button">+ Adicionar próxima linha da IA</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ---------- BIBLIOTECA ---------- -->
+    <section class="view" data-view="biblioteca">
+      <header class="view-head">
+        <div>
+          <h1>Biblioteca</h1>
+          <p class="sub">Suas criações, prontas para ouvir, exportar e compartilhar.</p>
+        </div>
+        <div class="view-actions">
+          <input type="search" id="librarySearch" placeholder="Buscar por título ou tema" />
+          <select id="libraryFilter"><option value="">Todos os gêneros</option></select>
+          <button class="btn btn-ghost btn-sm" id="btnLibraryRefresh" type="button">Atualizar</button>
+        </div>
+      </header>
+      <div class="track-grid" id="libraryGrid"></div>
+      <div class="empty" id="libraryEmpty" hidden>
+        <h3>Sua biblioteca está vazia</h3>
+        <p>Crie a primeira faixa na aba <b>Criar</b>.</p>
+      </div>
+    </section>
+
+    <!-- ---------- PLAYLISTS ---------- -->
+    <section class="view" data-view="playlists">
+      <header class="view-head">
+        <div>
+          <h1>Playlists</h1>
+          <p class="sub">Organize por gênero, clima ou vibe.</p>
+        </div>
+        <div class="view-actions">
+          <input type="text" id="playlistName" placeholder="Nome da nova playlist" />
+          <button class="btn btn-primary btn-sm" id="btnCreatePlaylist" type="button">Criar playlist</button>
+        </div>
+      </header>
+      <div class="playlist-grid" id="playlistGrid"></div>
+      <div class="panel" id="playlistDetail" hidden>
+        <div class="panel-head">
+          <h3 id="playlistTitle">Playlist</h3>
+          <div class="row">
+            <button class="btn btn-ghost btn-sm" id="btnPlaylistDelete" type="button">Excluir</button>
+            <button class="btn btn-ghost btn-sm" id="btnPlaylistClose" type="button">Fechar</button>
+          </div>
+        </div>
+        <div class="track-list" id="playlistTracks"></div>
+      </div>
+    </section>
+
+    <!-- ---------- MEU MODELO ---------- -->
+    <section class="view" data-view="modelo">
+      <header class="view-head">
+        <div>
+          <h1>Meu modelo de música</h1>
+          <p class="sub">Seu perfil criativo orienta geração, letras e mixagem do estúdio.</p>
+        </div>
+      </header>
+      <div class="create-grid">
+        <div class="panel">
+          <label class="field-label" for="displayName">Nome do estúdio</label>
+          <input type="text" id="displayName" />
+          <span class="field-label">Gêneros favoritos</span>
+          <div class="chips" id="favGenres"></div>
+          <div class="row row-2">
+            <label class="field">
+              <span class="field-label">Voz padrão</span>
+              <select id="profileVoice"></select>
+            </label>
+            <label class="field">
+              <span class="field-label">Duração padrão <b id="profileDurationValue">75s</b></span>
+              <input type="range" id="profileDuration" min="25" max="120" step="5" value="75" />
+            </label>
+          </div>
+          <button class="btn btn-primary" id="btnSaveProfile" type="button">Salvar perfil</button>
+        </div>
+
+        <div class="panel">
+          <h3>Características do modelo</h3>
+          <label class="field">
+            <span class="field-label">Energia <b id="energyValue">0.60</b></span>
+            <input type="range" id="energy" min="0" max="1" step="0.05" value="0.6" />
+          </label>
+          <label class="field">
+            <span class="field-label">Brilho do timbre <b id="brightnessValue">0.50</b></span>
+            <input type="range" id="brightness" min="0" max="1" step="0.05" value="0.5" />
+          </label>
+          <label class="field">
+            <span class="field-label">Variação de andamento <b id="bpmBiasValue">0%</b></span>
+            <input type="range" id="bpmBias" min="-20" max="20" step="1" value="0" />
+          </label>
+          <label class="field">
+            <span class="field-label">Caráter da voz</span>
+            <select id="vocalCharacter">
+              <option value="natural">Natural</option>
+              <option value="suspiro">Suspiro</option>
+              <option value="rasp">Rasgado</option>
+              <option value="suave">Suave</option>
+              <option value="belforte">Belforte</option>
+            </select>
+          </label>
+          <p class="fineprint">O perfil é aplicado como "<b>modificador de estilo</b>" nas gerações: o compositor ajusta andamento, brilho e dinâmica de acordo com estas escolhas.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ---------- EXPLORAR ---------- -->
+    <section class="view" data-view="explorar">
+      <header class="view-head">
+        <div>
+          <h1>Explorar</h1>
+          <p class="sub">Ideias em destaque da comunidade e faixas publicadas por você.</p>
+        </div>
+      </header>
+      <h3 class="section-title">Publicadas por você</h3>
+      <div class="track-grid" id="exploreTracks"></div>
+      <h3 class="section-title">Ideias da comunidade</h3>
+      <div class="idea-grid" id="ideaGrid"></div>
+    </section>
+
+  </main>
+
+  <!-- ================= PLAYER ================= -->
+  <footer class="player" id="player">
+    <div class="player-now">
+      <div class="cover" id="playerCover"><svg viewBox="0 0 24 24"><path d="M20 3v12.5a3.5 3.5 0 1 1-2-3.16V7.4l-8 1.7v7.4a3.5 3.5 0 1 1-2-3.16V6.6z"/></svg></div>
+      <div class="player-meta">
+        <strong id="playerTitle">Nada tocando</strong>
+        <span id="playerSub">Escolha uma faixa</span>
+      </div>
+    </div>
+
+    <div class="player-center">
+      <div class="player-controls">
+        <button class="ctl" id="btnShuffle" title="Aleatório"><svg viewBox="0 0 24 24"><path d="M17 3l4 4-4 4V8h-2.3l-1.9 1.9-1.4-1.4L13.2 7H17zM3 7h4.2l7.4 10H17v-3l4 4-4 4v-3h-2.6L7.4 9H3zm13 1.6 1.4 1.4L13 13.4 11.6 12z"/></svg></button>
+        <button class="ctl" id="btnPrev" title="Anterior"><svg viewBox="0 0 24 24"><path d="M6 6h2.2v12H6zm12 0v12l-9-6z"/></svg></button>
+        <button class="ctl ctl-main" id="btnPlay" title="Tocar/Pausar"><svg viewBox="0 0 24 24" id="playIcon"><path d="M8 5v14l11-7z"/></svg></button>
+        <button class="ctl" id="btnNext" title="Próxima"><svg viewBox="0 0 24 24"><path d="M15.8 6H18v12h-2.2zM6 6l9 6-9 6z"/></svg></button>
+        <button class="ctl" id="btnRepeat" title="Repetir"><svg viewBox="0 0 24 24"><path d="M7 7h10v3l4-4-4-4v3H5v6h2zm10 10H7v-3l-4 4 4 4v-3h12v-6h-2z"/></svg></button>
+      </div>
+      <div class="player-seek">
+        <span id="playerCurrent">0:00</span>
+        <div class="seek-track" id="seekTrack"><div class="seek-bar" id="seekBar"></div></div>
+        <span id="playerDuration">0:00</span>
+      </div>
+    </div>
+
+    <div class="player-right">
+      <button class="ctl" id="btnQueue" title="Fila"><svg viewBox="0 0 24 24"><path d="M3 5h18v2H3zm0 4h18v2H3zm0 4h12v2H3zm0 4h12v2H3z"/></svg></button>
+      <button class="ctl" id="btnDownloadWav" title="Baixar .wav"><svg viewBox="0 0 24 24"><path d="M3 10h2v4H3zm4-4h2v12H7zm4-3h2v18h-2zm4 5h2v8h-2zm4 2h2v4h-2z"/></svg></button>
+      <button class="ctl" id="btnDownload" title="Baixar MP3"><svg viewBox="0 0 24 24"><path d="M11 3h2v10l4-4 1.4 1.4L12 17.2 5.6 10.4 7 9l4 4zM4 19h16v2H4z"/></svg></button>
+      <button class="ctl" id="btnShare" title="Compartilhar"><svg viewBox="0 0 24 24"><path d="M18 16a3 3 0 0 0-2.2 1l-6-3.1a3 3 0 0 0 0-1.8l6-3.1A3 3 0 1 0 15 6l-6 3.1a3 3 0 1 0 0 5.8l6 3.1A3 3 0 1 0 18 16z"/></svg></button>
+      <div class="volume">
+        <span class="ctl" id="btnMute"><svg viewBox="0 0 24 24"><path d="M4 9h4l5-4v14l-5-4H4zm12.5 3a4.5 4.5 0 0 0-2.5-4v8a4.5 4.5 0 0 0 2.5-4z"/></svg></span>
+        <input type="range" id="volume" min="0" max="1" step="0.01" value="0.9" />
+      </div>
+    </div>
+  </footer>
+
+  <div class="queue-panel" id="queuePanel" hidden>
+    <div class="panel-head">
+      <h3>Fila</h3>
+      <button class="btn btn-ghost btn-sm" id="btnQueueClose" type="button">Fechar</button>
+    </div>
+    <div class="queue-list" id="queueList"></div>
+  </div>
+
+  <div class="modal-backdrop" id="modalBackdrop" hidden>
+    <div class="modal" id="modal">
+      <div class="panel-head">
+        <h3 id="modalTitle">Adicionar à playlist</h3>
+        <button class="btn btn-ghost btn-sm" id="btnModalClose" type="button">Fechar</button>
+      </div>
+      <div class="modal-body" id="modalBody"></div>
+    </div>
+  </div>
+
+  <div class="toasts" id="toasts"></div>
+</div>
+
+<audio id="audio" preload="metadata"></audio>
+<script src="/app.js" type="module"></script>
+</body>
+</html>

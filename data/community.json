@@ -1,0 +1,92 @@
+[
+  {
+    "id": "idea-1",
+    "author": "Lia Violante",
+    "title": "Saudade de’Ordem Grande",
+    "prompt": "MPB melancólico sobre saudade de uma casa antiga no fim de tarde, violão e bateria leve",
+    "genre": "mpb",
+    "mood": "melancolico",
+    "likes": 412
+  },
+  {
+    "id": "idea-2",
+    "author": "Bruno K.",
+    "title": "Luz de Neon",
+    "prompt": "Trap noturno com 808 pesado, máquina de café e madrugada na cidade",
+    "genre": "trap",
+    "mood": "ansioso",
+    "likes": 356
+  },
+  {
+    "id": "idea-3",
+    "author": "Dona Zefa",
+    "title": "Chuva na Janela",
+    "prompt": "Sertanejo silencioso sobre chuva na janela e um amor que ainda volta",
+    "genre": "sertanejo",
+    "mood": "romantic",
+    "likes": 298
+  },
+  {
+    "id": "idea-4",
+    "author": "MC Bonitinho",
+    "title": "Baile da Madrugada",
+    "prompt": "Funk brasileiro animado com tamborim pesado para a madrugada",
+    "genre": "funk_br",
+    "mood": "dancante",
+    "likes": 521
+  },
+  {
+    "id": "idea-5",
+    "author": "Estúdio Aurora",
+    "title": "Estrada Sem Fim",
+    "prompt": "Rock nacional sobre estrada, liberdade e um rádio velho quebrado",
+    "genre": "rock_nacional",
+    "mood": "inspirador",
+    "likes": 187
+  },
+  {
+    "id": "idea-6",
+    "author": "Ana Clara",
+    "title": "Café e Vinil",
+    "prompt": "Lo-fi calmo para estudar, chuva na janela e uma melodia de piano",
+    "genre": "lofi",
+    "mood": "calmo",
+    "likes": 243
+  },
+  {
+    "id": "idea-7",
+    "author": "Rafa Bitoca",
+    "title": "Carnaval do Povo",
+    "prompt": "Samba alegre com percussão de escola de samba e letra sobre festa de rua",
+    "genre": "samba",
+    "mood": "alegre",
+    "likes": 389
+  },
+  {
+    "id": "idea-8",
+    "author": "Noite Blanca",
+    "title": "Boate Vazia",
+    "prompt": "House noturno e vazio, luz colorida e uma solidão bonita",
+    "genre": "house",
+    "mood": "melancolico",
+    "likes": 164
+  },
+  {
+    "id": "idea-9",
+    "author": "Coral da Favela",
+    "title": "Coro de Domingo",
+    "prompt": "Gospel emotivo sobre recomeço e fé depois de tudo",
+    "genre": "gospel",
+    "mood": "inspirador",
+    "likes": 275
+  },
+  {
+    "id": "idea-10",
+    "author": "Tia Marlene",
+    "title": "Chuva de Janeiro",
+    "prompt": "Pagode para brinhar na chuva de janeiro com a família reunida",
+    "genre": "pagode",
+    "mood": "alegre",
+    "likes": 208
+  }
+]
