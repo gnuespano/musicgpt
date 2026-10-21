@@ -382,6 +382,11 @@
 
   <!-- ================= PLAYER ================= -->
   <footer class="player" id="player">
+    <!-- visualizador de espectro (Web Audio API) -->
+    <div class="spectrum-strip">
+      <canvas id="spectrum" class="spectrum" aria-hidden="true"></canvas>
+    </div>
+
     <div class="player-now">
       <div class="cover" id="playerCover"><svg viewBox="0 0 24 24"><path d="M20 3v12.5a3.5 3.5 0 1 1-2-3.16V7.4l-8 1.7v7.4a3.5 3.5 0 1 1-2-3.16V6.6z"/></svg></div>
       <div class="player-meta">

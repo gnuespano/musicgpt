@@ -19,7 +19,7 @@ Sem build step, sem framework, sem bundler. Uma dependência (`@breezystack/lame
 | 1 | **Gerador de músicas com IA** | `server/providers/acestep.js` (ACE-Step 1.5 — API oficial `acemusic.ai`, padrão) + `server/audio/render.js` (motor de síntese local, fallback). Prompt → estrutura, tom, acordes, bateria, baixo, arpejo, melodia e voz. |
 | 2 | **Modelo de música com IA personalizado** | Aba **Meu modelo**: perfil criativo (gêneros favoritos, energia, brilho, variação de andamento, caráter da voz) que é aplicado como modificador de estilo nas gerações. |
 | 3 | **Gerador de letras** | `server/lyrics.js` — letra completa com tags em inglês (`[Verse]`, `[Pre-Chorus]`, `[Chorus]`, `[Bridge]`, `[Outro]`) **ou** colaboração linha a linha. Concordância de gênero (artigos, possessivos, preposições) em pt-BR e inglês. |
-| 4 | **Player de música inteligente** | Barra inferior: play/pause, anterior/próxima, seek clicável, volume, mute, aleatório, repetir, fila, export e compartilhamento. |
+| 4 | **Player de música inteligente** | Barra inferior: play/pause, anterior/próxima, seek clicável, volume, mute, aleatório, repetir, fila, export e compartilhamento — mais o **visualizador de espectro** em tempo real (Web Audio API). |
 | 5 | **Playlists e gerenciamento** | CRUD completo de playlists; faixas podem ser adicionadas/removidas; busca e filtro por gênero na biblioteca. |
 | 6 | **Biblioteca musical com IA** | Biblioteca persistente com waveform, BPM, tom, estrutura, plays; aba **Explorar** com ideias da comunidade e faixas publicadas. |
 | 7 | **Exportar e compartilhar** | Botão **"Baixar .wav"** no painel de resultado (ao lado de "Ouvir agora"), no card da faixa (ao lado do play) e no player; **"Baixar MP3"** com cache em disco; compartilhamento via Web Share API ou link copiado. |
@@ -27,7 +27,31 @@ Sem build step, sem framework, sem bundler. Uma dependência (`@breezystack/lame
 ### Duração e camadas extras
 
 - **Duração: 25 s a 2 min** (`MAX_DURATION_SEC = 120` em `server/audio/render.js`). O teto é garantido em três níveis: slider da interface, validação da API (`Math.min(MAX_DURATION_SEC, ...)`) e o próprio motor, que **encurta a estrutura** (remove outro/ponte) se o andamento natural do gênero não couber nos 2 minutos.
-- **Opção Lo-fi**: quando ligada, injeta uma camada de **chuva ambiente** no fundo da mixagem — ruído branco → passa-baixa em cascata (2 polos, corte em 1,8 kHz) → corte de graves (140 Hz), com rajadas lentas (LFO de 0,07 Hz e 0,23 Hz) e dois canais de ruído independentes (imagem estéreo larga). Medido: −5 dB @ 1,8 kHz, −19 dB @ 6 kHz, −34 dB @ 20 kHz, a −20 dB em relação à música.
+- **Opção Lo-fi**: quando ligada, injaja uma camada de **chuva ambiente** no fundo da mixagem — ruído branco → passa-baixa em cascata (2 polos, corte em 1,8 kHz) → corte de graves (140 Hz), com rajadas lentas (LFO de 0,07 Hz e 0,23 Hz) e dois canais de ruído independentes (imagem estéreo larga). Medido: −5 dB @ 1,8 kHz, −19 dB @ 6 kHz, −34 dB @ 20 kHz, a −20 dB em relação à música.
+- **Visualizador de espectro**: faixa de barras animadas no topo do player (canvas 2D + Web Audio API). Detalhes abaixo.
+
+### Visualizador de espectro (Web Audio API)
+
+O player tem uma **faixa de barras** no topo que reage à frequência da música em tempo real.
+
+```
+<audio> ──▶ MediaElementAudioSourceNode ──▶ AnalyserNode ──▶ GainNode ──▶ speakers
+                                              │
+                                              └─▶ getByteFrequencyData() ──▶ canvas 2D
+```
+
+- **Captura**: o `<audio>` vira a fonte do grafo de áudio (`createMediaElementSource`), que alimenta um `AnalyserNode` (`fftSize = 2048`). Os bins são agrupados em barras com **escala logarítmica** (mais resolução nas frequências graves, onde mora a energia da música).
+- **Desenho**: `requestAnimationFrame` desenha as barras num `<canvas>` 2D com as cores do tema (`--brand` roxo → `--brand-2` violeta → azul), com ataque rápido e relaxamento lento (as barras "respiram" como um VU real).
+- **Pausa/play**: o `requestAnimationFrame` é cancelado no evento `pause` (o último quadro fica congelado e esmaecido) e religado no `play`.
+- **Volume**: com o elemento ligado ao grafo, os navegadores **ignoram** `volume`/`muted` do `<audio>` — por isso o controle do player passa pelo `GainNode` (`applyVolume()`), e não pelo atributo do elemento.
+- **Responsivo**: o buffer do canvas é recalculado no `resize`/`orientationchange` e por `ResizeObserver`, respeitando o `devicePixelRatio` (limitado a 2× para não pesar no celular). A faixa encolhe no mobile (`--spectrum-h`) e o player ganha altura (`--player-h`) para acomodá-la sem empurrar o conteúdo.
+- **Fallback**: sem Web Audio API (ou se o navegador bloquear o `AudioContext`), o app continua tocando normalmente — só não há visualização.
+
+Teste automatizado (Chromium headless via CDP, 21 verificações):
+
+```bash
+npm test              # precisa do servidor no ar (npm start)
+```
 
 ---
 
@@ -54,6 +78,9 @@ musicgpt/
 │       ├── remote.js       # download + parsing de duração de MP3/WAV
 │       └── worker.js       # render em worker thread (servidor não trava)
 ├── public/                 # SPA (HTML + CSS + JS puro, sem build)
+├── scripts/
+│   ├── gerar-certificado.mjs   # certificado self-signed para HTTPS local
+│   └── testar-espectro.mjs     # teste do visualizador (Chromium headless + CDP)
 └── data/                   # library.json, playlists.json, profile.json, tracks/
 ```
 
@@ -292,6 +319,7 @@ cd musicgpt
 npm install          # só o encoder de MP3
 npm start            # porta 8787 (PORT=xxxx para trocar)
 npm run dev          # com --watch
+npm test             # teste do visualizador de espectro (servidor precisa estar no ar)
 ```
 
 Variáveis úteis: `PORT`, `HOST`, `MUSICGPT_DATA_DIR`, `MUSICGPT_MUSIC_PROVIDER`, `MUSICGPT_LYRICS_PROVIDER`, `MUSICGPT_TTS_PROVIDER`, `ACESTEP_API_KEY`, `ACESTEP_BASE_URL`, `ACESTEP_MODEL`, `ACESTEP_THINKING`, `ACESTEP_VOCAL_LANGUAGE`, `ACESTEP_DURATION_FACTOR`, `ACESTEP_TIMEOUT_MS`, `REPLICATE_API_TOKEN`, `FAL_KEY`, `OPENAI_API_KEY`, `OPENROUTER_API_KEY`, `MUSICGPT_SSL_CERT`, `MUSICGPT_SSL_KEY`.

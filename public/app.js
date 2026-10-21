@@ -21,6 +21,8 @@ const state = {
   voiceEngine: 'auto',
   ttsVoice: '',
   singStrength: 0.85,
+  volume: 0.9,
+  muted: false,
 };
 
 /* ------------------------------------------------------------------ *
@@ -747,6 +749,7 @@ function playTrack(track, queue = null) {
   if (queue) state.queue = queue;
   if (!state.queue.some((t) => t.id === track.id)) state.queue.push(track);
   state.currentId = track.id;
+  ensureAudioGraph();
   audio.src = `/api/tracks/${track.id}/audio`;
   audio.play().catch(() => toast('Toque novamente para iniciar a reprodução.', 'error'));
   updatePlayerMeta(track);
@@ -770,6 +773,7 @@ function stopPlayer() {
   $('#playerCover').innerHTML = ICON.note;
   $('#seekBar').style.width = '0%';
   $('#btnPlay').innerHTML = ICON.play;
+  resetSpectrum();
   renderQueue();
 }
 
@@ -811,6 +815,306 @@ function renderQueue() {
         <span>${fmtTime(t.duration)}</span>
       </div>`).join('')
     : '<p style="color:var(--muted);font-size:12.5px">Fila vazia.</p>';
+}
+
+/* ------------------------------------------------------------------ *
+ * Visualizador de espectro (Web Audio API)
+ * ------------------------------------------------------------------ */
+
+/**
+ * O <audio> alimenta um MediaElementAudioSourceNode -> AnalyserNode ->
+ * GainNode -> saida. O GainNode e obrigatorio: com o elemento conectado
+ * ao grafo, os navegadores ignoram o atributo `volume` do <audio>, e o
+ * controle de volume so funciona se passar pelo ganho.
+ */
+const SPECTRUM_MAX_BARS = 72;
+
+const spectrum = {
+  canvas: $('#spectrum'),
+  ctx: null,
+  audioCtx: null,
+  analyser: null,
+  source: null,
+  gain: null,
+  bins: null,
+  bars: 0,
+  width: 0,
+  height: 0,
+  levels: new Float32Array(0),
+  smooth: new Float32Array(0),
+  rafId: 0,
+  playing: false,
+  unsupported: false,
+  palette: { top: '#b46cff', mid: '#7c5cff', bottom: '#4d7cff' },
+};
+
+/** Le uma cor do tema (CSS custom property) para o canvas usar a mesma paleta. */
+function themeColor(name, fallback) {
+  const value = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  return value || fallback;
+}
+
+function initSpectrum() {
+  const canvas = spectrum.canvas;
+  if (!canvas) return;
+  spectrum.ctx = canvas.getContext('2d');
+  if (!spectrum.ctx) return;
+
+  spectrum.palette = {
+    top: themeColor('--brand-2', '#b46cff'),
+    mid: themeColor('--brand', '#7c5cff'),
+    bottom: themeColor('--brand-blue', '#4d7cff'),
+  };
+
+  resizeSpectrum();
+  if (typeof ResizeObserver !== 'undefined') {
+    new ResizeObserver(resizeSpectrum).observe(canvas);
+  }
+  window.addEventListener('resize', resizeSpectrum);
+  window.addEventListener('orientationchange', () => setTimeout(resizeSpectrum, 250));
+  drawIdleSpectrum();
+
+  // ponto de inspecao para depuracao/testes (nao altera o comportamento)
+  window.__musicgptSpectrum = spectrum;
+}
+
+/** Ajusta o buffer do canvas ao tamanho real da tela (e ao devicePixelRatio). */
+function resizeSpectrum() {
+  const canvas = spectrum.canvas;
+  const ctx = spectrum.ctx;
+  if (!canvas || !ctx) return;
+
+  const rect = canvas.getBoundingClientRect();
+  const width = Math.max(1, Math.round(rect.width));
+  const height = Math.max(1, Math.round(rect.height));
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+
+  spectrum.width = width;
+  spectrum.height = height;
+
+  const pixelW = Math.round(width * dpr);
+  const pixelH = Math.round(height * dpr);
+  if (canvas.width !== pixelW || canvas.height !== pixelH) {
+    canvas.width = pixelW;
+    canvas.height = pixelH;
+  }
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+  // quantas barras cabem na largura atual (mais barras em telas largas)
+  const bars = Math.max(16, Math.min(SPECTRUM_MAX_BARS, Math.floor(width / 7)));
+  if (bars !== spectrum.bars) {
+    spectrum.bars = bars;
+    spectrum.levels = new Float32Array(bars);
+    spectrum.smooth = new Float32Array(bars);
+  }
+  if (!spectrum.playing) drawIdleSpectrum();
+}
+
+/**
+ * Cria (uma unica vez) o grafo de audio. Sem Web Audio API o app continua
+ * tocando normalmente — apenas nao ha visualizador.
+ */
+function ensureAudioGraph() {
+  if (spectrum.source) return true;
+  if (spectrum.unsupported) return false;
+
+  const Ctx = window.AudioContext || window.webkitAudioContext;
+  if (!Ctx) {
+    spectrum.unsupported = true;
+    return false;
+  }
+
+  let ctx = null;
+  let source = null;
+  try {
+    ctx = new Ctx();
+    source = ctx.createMediaElementSource(audio);
+
+    const analyser = ctx.createAnalyser();
+    analyser.fftSize = 2048;
+    analyser.smoothingTimeConstant = 0.72;
+    analyser.minDecibels = -85;
+    analyser.maxDecibels = -18;
+
+    const gain = ctx.createGain();
+    gain.gain.value = 1;
+
+    source.connect(analyser);
+    analyser.connect(gain);
+    gain.connect(ctx.destination);
+
+    spectrum.audioCtx = ctx;
+    spectrum.source = source;
+    spectrum.analyser = analyser;
+    spectrum.gain = gain;
+    spectrum.bins = new Uint8Array(analyser.frequencyBinCount);
+    applyVolume();
+    return true;
+  } catch (err) {
+    console.warn('[spectrum] Web Audio API indisponivel:', err);
+    // se o elemento ja foi conectado, garante que o audio continue saindo
+    try { if (source && ctx) source.connect(ctx.destination); } catch { /* ignora */ }
+    spectrum.audioCtx = null;
+    spectrum.source = null;
+    spectrum.analyser = null;
+    spectrum.gain = null;
+    spectrum.unsupported = true;
+    return false;
+  }
+}
+
+/** Volume/mudo: passa pelo GainNode quando o grafo existe, senao no <audio>. */
+function applyVolume() {
+  if (spectrum.gain && spectrum.audioCtx) {
+    // com o <audio> conectado ao grafo, o navegador ignora `volume`/`muted`
+    // do elemento: o controle precisa passar pelo ganho do audio.
+    spectrum.gain.gain.setTargetAtTime(state.muted ? 0 : state.volume, spectrum.audioCtx.currentTime, 0.02);
+    audio.volume = 1;
+    audio.muted = false;
+  } else {
+    audio.volume = state.volume;
+    audio.muted = state.muted;
+  }
+}
+
+/** Agrupa os bins do analizador em barras (escala log: mais peso nas baixas). */
+function updateSpectrumLevels() {
+  const bins = spectrum.bins;
+  const n = spectrum.bars;
+  if (!bins || !n) return;
+
+  const minBin = 2;
+  const maxBin = Math.max(minBin + 1, Math.floor(bins.length * 0.55));
+  const ratio = maxBin / minBin;
+
+  for (let i = 0; i < n; i++) {
+    const from = Math.floor(minBin * Math.pow(ratio, i / n));
+    const to = Math.max(from + 1, Math.ceil(minBin * Math.pow(ratio, (i + 1) / n)));
+    let peak = 0;
+    for (let b = from; b < to && b < bins.length; b += 1) {
+      if (bins[b] > peak) peak = bins[b];
+    }
+    // leve realce para as faixas mais graves ficarem visiveis
+    const gainBoost = 1 + (i / n) * 0.35;
+    spectrum.levels[i] = Math.min(1, (peak / 255) * gainBoost);
+  }
+}
+
+function roundedBar(ctx, x, y, w, h, r) {
+  if (typeof ctx.roundRect === 'function') {
+    ctx.beginPath();
+    ctx.roundRect(x, y, w, h, r);
+    return;
+  }
+  ctx.beginPath();
+  ctx.rect(x, y, w, h);
+}
+
+function drawSpectrum() {
+  const ctx = spectrum.ctx;
+  if (!ctx) return;
+  const { width, height, bars } = spectrum;
+  if (!bars) return;
+
+  ctx.clearRect(0, 0, width, height);
+
+  const gap = width > 520 ? 3 : 2;
+  const barW = Math.max(1.5, (width - gap * (bars - 1)) / bars);
+  const maxH = Math.max(2, height - 2);
+
+  const grad = ctx.createLinearGradient(0, 0, 0, height);
+  grad.addColorStop(0, spectrum.palette.top);
+  grad.addColorStop(0.55, spectrum.palette.mid);
+  grad.addColorStop(1, spectrum.palette.bottom);
+
+  ctx.fillStyle = grad;
+  ctx.shadowColor = 'rgba(124, 92, 255, .55)';
+  ctx.shadowBlur = 7;
+
+  for (let i = 0; i < bars; i++) {
+    const value = spectrum.smooth[i];
+    const barH = Math.max(2, value * maxH);
+    const x = i * (barW + gap);
+    ctx.globalAlpha = 0.45 + value * 0.55;
+    roundedBar(ctx, x, height - barH, barW, barH, Math.min(barW / 2, 2));
+    ctx.fill();
+  }
+
+  ctx.globalAlpha = 1;
+  ctx.shadowBlur = 0;
+}
+
+/** Estado parado: uma linha de base discreta para a faixa nao ficar vazia. */
+function drawIdleSpectrum() {
+  const ctx = spectrum.ctx;
+  if (!ctx) return;
+  const { width, height, bars } = spectrum;
+  ctx.clearRect(0, 0, width, height);
+  if (!bars) return;
+
+  const gap = width > 520 ? 3 : 2;
+  const barW = Math.max(1.5, (width - gap * (bars - 1)) / bars);
+  const grad = ctx.createLinearGradient(0, 0, width, 0);
+  grad.addColorStop(0, spectrum.palette.mid);
+  grad.addColorStop(1, spectrum.palette.bottom);
+  ctx.fillStyle = grad;
+  ctx.globalAlpha = 0.22;
+  for (let i = 0; i < bars; i += 1) {
+    roundedBar(ctx, i * (barW + gap), height - 2, barW, 2, 1);
+    ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+}
+
+function spectrumFrame() {
+  if (!spectrum.playing) return;
+  spectrum.rafId = requestAnimationFrame(spectrumFrame);
+  if (document.hidden || !spectrum.analyser || !spectrum.bins) return;
+
+  // o navegador pode suspender o contexto (aba em segundo plano): religa
+  if (spectrum.audioCtx?.state === 'suspended') spectrum.audioCtx.resume().catch(() => {});
+
+  spectrum.analyser.getByteFrequencyData(spectrum.bins);
+  updateSpectrumLevels();
+
+  // ataque rapido / relaxamento lento: as barras "respiram" como um VU real
+  for (let i = 0; i < spectrum.bars; i += 1) {
+    const target = spectrum.levels[i];
+    const current = spectrum.smooth[i];
+    const factor = target > current ? 0.55 : 0.14;
+    spectrum.smooth[i] = current + (target - current) * factor;
+  }
+  drawSpectrum();
+}
+
+/** Liga a animacao (somando ao que ja estiver tocando). */
+function startSpectrum() {
+  if (!ensureAudioGraph()) return;
+  spectrum.playing = true;
+  spectrum.canvas?.classList.remove('is-paused');
+  if (spectrum.audioCtx.state === 'suspended') {
+    spectrum.audioCtx.resume().catch(() => {});
+  }
+  if (!spectrum.rafId) spectrum.rafId = requestAnimationFrame(spectrumFrame);
+}
+
+/** Congela a animacao mantendo o ultimo quadro visivel. */
+function stopSpectrum() {
+  spectrum.playing = false;
+  if (spectrum.rafId) {
+    cancelAnimationFrame(spectrum.rafId);
+    spectrum.rafId = 0;
+  }
+  spectrum.canvas?.classList.add('is-paused');
+}
+
+/** Reseta o visualizador (player sem faixa). */
+function resetSpectrum() {
+  stopSpectrum();
+  spectrum.smooth.fill(0);
+  spectrum.levels.fill(0);
+  spectrum.canvas?.classList.remove('is-paused');
+  drawIdleSpectrum();
 }
 
 /* ------------------------------------------------------------------ *
@@ -1028,6 +1332,7 @@ function bind() {
       if (t) playTrack(t, state.tracks);
       return;
     }
+    ensureAudioGraph();
     if (audio.paused) { audio.play(); $('#btnPlay').innerHTML = ICON.pause; }
     else { audio.pause(); $('#btnPlay').innerHTML = ICON.play; }
   });
@@ -1068,10 +1373,14 @@ function bind() {
     if (t) shareTrack(t);
     else toast('Nada tocando.', 'error');
   });
-  $('#volume').addEventListener('input', (e) => { audio.volume = Number(e.target.value); });
+  $('#volume').addEventListener('input', (e) => {
+    state.volume = Number(e.target.value);
+    applyVolume();
+  });
   $('#btnMute').addEventListener('click', () => {
-    audio.muted = !audio.muted;
-    $('#btnMute').textContent = audio.muted ? '◂̸' : '◂';
+    state.muted = !state.muted;
+    applyVolume();
+    $('#btnMute').textContent = state.muted ? '◂̸' : '◂';
   });
   $('#seekTrack').addEventListener('click', (ev) => {
     if (!audio.duration) return;
@@ -1092,9 +1401,35 @@ function bind() {
     }
     nextTrack(true);
   });
-  audio.addEventListener('play', () => { $('#btnPlay').innerHTML = ICON.pause; });
-  audio.addEventListener('pause', () => { $('#btnPlay').innerHTML = ICON.play; });
+  audio.addEventListener('play', () => {
+    $('#btnPlay').innerHTML = ICON.pause;
+    startSpectrum();
+  });
+  audio.addEventListener('pause', () => {
+    $('#btnPlay').innerHTML = ICON.play;
+    stopSpectrum();
+  });
+  audio.addEventListener('volumechange', () => {
+    // o ganho do grafo e a fonte da verdade quando existe; aqui so
+    // refletimos o estado do elemento para manter a UI coerente
+    if (!spectrum.gain) {
+      state.volume = audio.volume;
+      state.muted = audio.muted;
+    }
+  });
 }
+
+/* a animacao nao roda com a aba em segundo plano (poupa bateria) */
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) {
+    if (spectrum.rafId) {
+      cancelAnimationFrame(spectrum.rafId);
+      spectrum.rafId = 0;
+    }
+  } else if (spectrum.playing && spectrum.analyser && !spectrum.rafId) {
+    spectrum.rafId = requestAnimationFrame(spectrumFrame);
+  }
+});
 
 /* ------------------------------------------------------------------ *
  * PWA: service worker, instalação e estado online
@@ -1196,6 +1531,8 @@ async function boot() {
   setupInstall();
   setupServiceWorker();
   setupOnlineState();
+  initSpectrum();
+  applyVolume();
   await loadConfig();
   await loadTracks();
   await loadPlaylists();
