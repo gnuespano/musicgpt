@@ -23,6 +23,8 @@ import { voiceOver, resolveTtsVoice } from './audio/voice.js';
 import { detectGenre, detectMood, MAX_DURATION_SEC } from './audio/render.js';
 import { encodeMp3, mp3Available } from './audio/mp3.js';
 import { mp3Duration, wavDuration } from './audio/remote.js';
+import { buildReferencePayload, referenceSummary } from './audio/reference.js';
+import { describeUploadError, isMultipart, readMultipart } from './upload.js';
 import {
   convertAudio,
   readSource,
@@ -129,7 +131,7 @@ function runWorker(options, onProgress) {
   });
 }
 
-async function executeJob(job, options) {
+async function executeJob(job, options, referenceAudio = null) {
   const emit = (patch) => {
     Object.assign(job, patch);
     for (const client of job.clients) {
@@ -156,6 +158,12 @@ async function executeJob(job, options) {
     const trackId = newId('trk');
     let lyrics = options.lyrics;
     let lyricsEngine = null;
+
+    // o audio de referencia so e usado pelo ACE-Step (motor multimodal)
+    if (referenceAudio && provider !== 'acestep') {
+      warnings.push('Audio de referencia ignorado: ele precisa do motor ACE-Step, que nao esta ativo neste servidor.');
+      emit({ detail: warnings[warnings.length - 1] });
+    }
 
     if (provider === 'acestep') {
       // O ACE-Step gera a musica E o vocal (com a letra). Quando o usuario
@@ -205,7 +213,7 @@ async function executeJob(job, options) {
       });
     } else {
       try {
-        result = await generateMusic({ ...options, lyrics, trackId }, (p) => {
+        result = await generateMusic({ ...options, lyrics, trackId, referenceAudio }, (p) => {
           emit({ stage: p.stage, progress: Math.min(92, 10 + Math.round((p.pct || 0) * 0.82)), detail: p.detail });
         });
         if (!result.peaks) result.peaks = null;
@@ -214,6 +222,9 @@ async function executeJob(job, options) {
         // procedural local para nao perder a geracao
         emit({ stage: 'motor local', progress: 90, detail: `provedor falhou (${err.message})` });
         warnings.push(`Provedor remoto indisponível (${err.message}). Usado o motor procedural local.`);
+        if (referenceAudio) {
+          warnings.push('O audio de referencia nao pode ser usado pelo motor local.');
+        }
         if (!options.instrumental && !lyrics) {
           // o motor local precisa de uma letra para cantar
           const local = generateLocalLyrics({
@@ -312,6 +323,9 @@ async function executeJob(job, options) {
       voice: options.voiceStyle || result.meta?.voice || null,
       voiceInfo,
       warnings,
+      // audio de referencia usado como estilo (sem o audio em si)
+      referenceAudio: result.meta?.referenceAudio
+        || (referenceAudio ? { ...referenceSummary(referenceAudio), used: false } : null),
       lofi: Boolean(options.lofi),
       engine: result.meta?.engine || effectiveProvider,
       provider: effectiveProvider,
@@ -384,8 +398,30 @@ export const handlers = {
     });
   },
 
+  /**
+   * POST /api/generate
+   *
+   * Aceita application/json (fluxo normal) ou multipart/form-data (quando o
+   * usuario anexa um audio de referencia para Audio-to-Audio / Style Transfer).
+   * No caso multipart, o audio vem no campo "referenceAudio".
+   */
   async generate(req, res) {
-    const body = await readJson(req);
+    let body;
+    let referenceAudio = null;
+
+    if (isMultipart(req)) {
+      let parsed;
+      try {
+        parsed = await readMultipart(req, res);
+      } catch (err) {
+        return json(res, 400, { error: describeUploadError(err) });
+      }
+      body = parsed.fields || {};
+      referenceAudio = buildReferencePayload(parsed.file);
+    } else {
+      body = await readJson(req);
+    }
+
     const prompt = String(body.prompt || '').trim();
     if (!prompt && !body.lyrics) {
       return json(res, 400, { error: 'Descreva a musica que voce quer criar.' });
@@ -402,10 +438,10 @@ export const handlers = {
       mood: moodKey,
       moodLabel: moodKey,
       style: body.style || genre.label,
-      instrumental: Boolean(body.instrumental),
+      instrumental: asBool(body.instrumental),
       duration: Math.min(MAX_DURATION_SEC, Math.max(20, Number(body.duration) || 75)),
       voiceStyle: VOICE_STYLES[body.voiceStyle] ? body.voiceStyle : genre.vocal,
-      lofi: Boolean(body.lofi),
+      lofi: asBool(body.lofi),
       variety: Number.isFinite(Number(body.variety)) ? Math.max(0, Math.min(1, Number(body.variety))) : 0.5,
       voiceEngine: ['auto', 'openrouter', 'procedural'].includes(body.voiceEngine) ? body.voiceEngine : 'auto',
       ttsVoice: typeof body.ttsVoice === 'string' ? body.ttsVoice : '',
@@ -429,7 +465,7 @@ export const handlers = {
       clients: new Set(),
     };
     jobs.set(job.id, job);
-    setTimeout(() => executeJob(job, options), 10);
+    setTimeout(() => executeJob(job, options, referenceAudio), 10);
     return json(res, 202, { jobId: job.id, status: job.status });
   },
 
@@ -810,4 +846,17 @@ function readJson(req) {
     });
     req.on('error', reject);
   });
+}
+
+/**
+ * Converte um valor em booleano.
+ *
+ * No multipart/form-data todo campo chega como texto: "false" seria
+ * verdadeiro com Boolean(), entao as flags sao normalizadas aqui.
+ */
+function asBool(value) {
+  if (typeof value === 'boolean') return value;
+  if (value == null) return false;
+  const text = String(value).trim().toLowerCase();
+  return text === 'true' || text === '1' || text === 'on' || text === 'yes';
 }

@@ -102,6 +102,13 @@ export const ACESTEP = {
    * passa a depender do arquivo local).
    */
   keepSourceAudio: process.env.MUSICGPT_KEEP_SOURCE_AUDIO !== '0',
+  /**
+   * Peso do audio de referencia (Audio-to-Audio / Style Transfer) na
+   * geracao: 0 = ignora o estilo do arquivo, 1 = segue o audio original
+   * de perto. A documentacao do ACE-Step recomenda ~0.2 para transferencia
+   * de estilo pura (a musica nova segue a referencia sem ser copia dela).
+   */
+  referenceStrength: Number(process.env.ACESTEP_REFERENCE_STRENGTH || 0.3),
 };
 
 /** Valores de exemplo: nao contam como chave configurada. */

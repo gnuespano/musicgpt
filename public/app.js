@@ -21,6 +21,7 @@ const state = {
   voiceEngine: 'auto',
   ttsVoice: '',
   singStrength: 0.85,
+  referenceAudioFile: null,
   volume: 0.9,
   muted: false,
 };
@@ -55,6 +56,19 @@ async function api(path, options = {}) {
     ...options,
     body: options.body ? JSON.stringify(options.body) : undefined,
   });
+  let data = null;
+  try { data = await res.json(); } catch { data = null; }
+  if (!res.ok) throw new Error(data?.error || `Falha na requisição (${res.status})`);
+  return data;
+}
+
+/**
+ * Envia um FormData (upload de arquivo).
+ * O Content-Type fica por conta do browser: ele precisa colocar o boundary
+ * do multipart no cabecalho.
+ */
+async function apiForm(path, formData) {
+  const res = await fetch(path, { method: 'POST', body: formData });
   let data = null;
   try { data = await res.json(); } catch { data = null; }
   if (!res.ok) throw new Error(data?.error || `Falha na requisição (${res.status})`);
@@ -132,6 +146,71 @@ function bindCreateBlocks() {
 }
 
 /* ------------------------------------------------------------------ *
+ * Áudio de referência (Audio-to-Audio / Style Transfer)
+ * ------------------------------------------------------------------ */
+
+/** Limite do upload (mesmo do servidor: 15 MB). */
+const MAX_REFERENCE_BYTES = 15 * 1024 * 1024;
+
+const AUDIO_EXT_RE = /\.(mp3|wav|wave|ogg|oga|opus|m4a|mp4|aac|flac|webm|aiff|aif)$/i;
+
+function formatBytes(bytes) {
+  const n = Number(bytes);
+  if (!Number.isFinite(n) || n <= 0) return '';
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${Math.round(n / 1024)} KB`;
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+/**
+ * Guarda o audio de referencia escolhido pelo usuario e reflecte o estado
+ * na tela (nome do arquivo + botao marcado).
+ */
+function setReferenceAudio(file) {
+  state.referenceAudioFile = file || null;
+  const box = $('#refAudioBox');
+  const btn = $('#btnAddAudio');
+  if (file) {
+    $('#refAudioName').textContent = file.name;
+    $('#refAudioSize').textContent = formatBytes(file.size);
+    if (box) box.hidden = false;
+    btn?.classList.add('is-on');
+    if (btn) btn.title = `Áudio de referência: ${file.name}`;
+  } else {
+    if (box) box.hidden = true;
+    btn?.classList.remove('is-on');
+    if (btn) btn.title = 'Anexar áudio de referência (o estilo e o timbre seguem o arquivo)';
+  }
+}
+
+function clearReferenceAudio() {
+  const input = $('#referenceAudioInput');
+  if (input) input.value = '';
+  setReferenceAudio(null);
+}
+
+/** Valida o arquivo escolhido antes de anexá-lo. */
+function acceptReferenceAudio(file) {
+  if (!file) {
+    clearReferenceAudio();
+    return;
+  }
+  if (file.size > MAX_REFERENCE_BYTES) {
+    toast(`Áudio muito grande (máx. ${formatBytes(MAX_REFERENCE_BYTES)}).`, 'error');
+    clearReferenceAudio();
+    return;
+  }
+  const pareceAudio = /^audio\//i.test(file.type || '') || AUDIO_EXT_RE.test(file.name || '');
+  if (!pareceAudio) {
+    toast('Esse arquivo não parece ser um áudio.', 'error');
+    clearReferenceAudio();
+    return;
+  }
+  setReferenceAudio(file);
+  toast(`Referência anexada: ${file.name}`, 'ok');
+}
+
+/* ------------------------------------------------------------------ *
  * Navegação
  * ------------------------------------------------------------------ */
 
@@ -197,24 +276,32 @@ async function generate() {
 
   let payload;
   try {
-    payload = await api('/api/generate', {
-      method: 'POST',
-      body: {
-        prompt,
-        title: $('#title').value.trim(),
-        genre: state.touched.genre ? selectedGenre() : '',
-        mood: state.touched.mood ? $('#mood').value : '',
-        voiceStyle: $('#voice').value,
-        duration: Number($('#duration').value),
-        instrumental: $('#instrumental').checked,
-        lofi: $('#lofi').checked,
-        variety: Number($('#variety').value) / 100,
-        voiceEngine: state.voiceEngine || 'auto',
-        ttsVoice: state.ttsVoice || '',
-        singStrength: state.singStrength ?? 0.85,
-        lyrics: $('#customLyrics').value.trim(),
-      },
-    });
+    const fields = {
+      prompt,
+      title: $('#title').value.trim(),
+      genre: state.touched.genre ? selectedGenre() : '',
+      mood: state.touched.mood ? $('#mood').value : '',
+      voiceStyle: $('#voice').value,
+      duration: Number($('#duration').value),
+      instrumental: $('#instrumental').checked,
+      lofi: $('#lofi').checked,
+      variety: Number($('#variety').value) / 100,
+      voiceEngine: state.voiceEngine || 'auto',
+      ttsVoice: state.ttsVoice || '',
+      singStrength: state.singStrength ?? 0.85,
+      lyrics: $('#customLyrics').value.trim(),
+    };
+
+    const reference = state.referenceAudioFile;
+    if (reference) {
+      // com audio de referencia o pedido vai em multipart/form-data
+      const form = new FormData();
+      for (const [key, value] of Object.entries(fields)) form.append(key, String(value));
+      form.append('referenceAudio', reference, reference.name);
+      payload = await apiForm('/api/generate', form);
+    } else {
+      payload = await api('/api/generate', { method: 'POST', body: fields });
+    }
   } catch (err) {
     toast(err.message, 'error');
     btn.disabled = false;
@@ -260,7 +347,8 @@ function watchJob(jobId, btn) {
           ${track.bpm ? `<span class="tag">${track.bpm} BPM</span>` : ''}
           ${track.key ? `<span class="tag">${escapeHtml(track.key)}</span>` : ''}
           ${track.lofi ? '<span class="tag">chuva</span>' : ''}
-          <span class="tag">${escapeHtml(track.engine || '')}</span>
+          ${track.referenceAudio?.used ? `<span class="tag">ref: ${escapeHtml(track.referenceAudio.name)}</span>` : ''}
+          ${track.engine ? `<span class="tag">${escapeHtml(track.engine || '')}</span>` : ''}
           ${track.voiceInfo?.engine === 'openrouter' ? '<span class="tag">voz IA</span>' : ''}
           ${track.voiceInfo?.engine === 'acestep' ? '<span class="tag">voz ACE-Step</span>' : ''}
         </div>`;
@@ -1162,6 +1250,16 @@ function bind() {
   });
 
   $('#btnGenerate').addEventListener('click', generate);
+
+  // áudio de referência: abre o seletor de arquivos e reflecte o chosen
+  $('#btnAddAudio').addEventListener('click', () => $('#referenceAudioInput').click());
+  $('#referenceAudioInput').addEventListener('change', (ev) => {
+    acceptReferenceAudio(ev.target.files?.[0] || null);
+  });
+  $('#btnRemoveRefAudio').addEventListener('click', () => {
+    clearReferenceAudio();
+    toast('Áudio de referência removido.', 'info');
+  });
   $('#btnCancelJob').addEventListener('click', () => {
     if (state.events) state.events.close();
     state.events = null;

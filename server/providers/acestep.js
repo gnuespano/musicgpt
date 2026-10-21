@@ -20,6 +20,20 @@
  * Este provider decodifica o base64, salva o MP3 no servidor (data/tracks)
  * e devolve o caminho local + o buffer para o player.
  *
+ * AUDIO DE REFERENCIA (Audio-to-Audio / Style Transfer):
+ * quando o usuario anexa um audio, ele entra como bloco `input_audio`
+ * da mensagem multimodal (data em base64) e a API usa o arquivo como
+ * referencia de estilo/timbre:
+ *
+ *   messages[0].content = [
+ *     { type: "text", text: "<prompt>...</prompt>" },
+ *     { type: "input_audio", input_audio: { data: "<base64>", format: "mp3" } }
+ *   ]
+ *   task_type: "text2music"
+ *   audio_cover_strength: 0.3      (0.2 = transferencia de estilo pura)
+ *
+ * Sem audio de referencia o pedido e EXATAMENTE o de antes (texto puro).
+ *
  * Sem ACESTEP_API_KEY no .env este arquivo nunca e chamado: o app usa o
  * motor procedural local (server/audio/render.js).
  */
@@ -28,6 +42,7 @@ import { ACESTEP, aceStepAvailable } from '../config.js';
 import { audioPath, computePeaks, newId, saveAudio } from '../store.js';
 import { downloadBuffer, mp3Duration, wavDuration } from '../audio/remote.js';
 import { decodeMp3Buffer } from '../audio/voice.js';
+import { referenceSummary } from '../audio/reference.js';
 
 /** Modelos tentados quando o servidor rejeita o "model" informado. */
 const MODEL_FALLBACKS = [
@@ -108,12 +123,30 @@ export function buildRequestBody({ prompt, lyrics, style, options = {} }) {
   const vocalLanguage = ACESTEP.vocalLanguage || (options.lang === 'en' ? 'en' : 'pt');
   if (vocalLanguage) audioConfig.vocal_language = vocalLanguage;
 
+  // audio de referencia (style transfer): bloco multimodal input_audio
+  const reference = options.referenceAudio || null;
+
+  const textContent = cleanLyrics
+    ? `<prompt>${caption}</prompt><lyrics>${cleanLyrics}</lyrics>`
+    : `<prompt>${caption}</prompt>`;
+
+  const content = reference
+    ? [
+      { type: 'text', text: textContent },
+      {
+        type: 'input_audio',
+        input_audio: {
+          data: reference.base64,
+          format: reference.format || 'mp3',
+        },
+      },
+    ]
+    : textContent;
+
   const body = {
     messages: [{
       role: 'user',
-      content: cleanLyrics
-        ? `<prompt>${caption}</prompt><lyrics>${cleanLyrics}</lyrics>`
-        : `<prompt>${caption}</prompt>`,
+      content,
     }],
     stream: false,
     // 5Hz LM: gera os codigos semanticos antes do DiT (qualidade mais alta)
@@ -127,6 +160,12 @@ export function buildRequestBody({ prompt, lyrics, style, options = {} }) {
 
   // sem letra do usuario: o proprio LM escreve a letra (sample mode)
   if (!cleanLyrics && !instrumental) body.sample_mode = true;
+
+  if (reference) {
+    // o audio anexado vira a referencia de estilo (task_type text2music)
+    body.task_type = 'text2music';
+    body.audio_cover_strength = ACESTEP.referenceStrength;
+  }
 
   if (ACESTEP.model) body.model = ACESTEP.model;
 
@@ -353,7 +392,7 @@ async function computeAudioPeaks(buffer, format) {
  * @param {string} lyrics  letra (vazio = o modelo escreve a letra)
  * @param {string} style   genero/estilo (ex.: "MPB")
  * @param {object} options { duration, instrumental, genreLabel, moodLabel, lofi,
- *                           trackId, onProgress }
+ *                           trackId, onProgress, referenceAudio }
  * @returns {Promise<{buffer: Buffer, format: string, duration: number|null,
  *                    file: string, path: string, meta: object}>}
  */
@@ -363,15 +402,42 @@ export async function generateAceMusic(prompt, lyrics, style, options = {}) {
   }
 
   const onProgress = options.onProgress || (() => {});
+  const reference = options.referenceAudio || null;
   const body = buildRequestBody({ prompt, lyrics, style, options });
 
   onProgress({
     stage: 'enviando ao ACE-Step',
     pct: 20,
-    detail: body.sample_mode ? 'o modelo escreve a letra' : 'letra + estilo',
+    detail: reference
+      ? `estilo a partir do audio (${reference.format})`
+      : (body.sample_mode ? 'o modelo escreve a letra' : 'letra + estilo'),
   });
 
-  const payload = await callApi(body);
+  let payload;
+  let usedReference = Boolean(reference);
+  try {
+    payload = await callApi(body);
+  } catch (err) {
+    // A API pode recusar o audio de referencia (formato nao suportado pelo
+    // modelo, arquivo corrompido, limite do plano). Nesses casos geramos
+    // SEM a referencia em vez de perder a faixa inteira.
+    const status = err?.status;
+    if (!reference || ![400, 413, 415, 422].includes(status)) throw err;
+    onProgress({
+      stage: 'gerando sem a referencia',
+      pct: 30,
+      detail: 'o ACE-Step recusou o audio anexado',
+    });
+    const semReferencia = buildRequestBody({
+      prompt,
+      lyrics,
+      style,
+      options: { ...options, referenceAudio: null },
+    });
+    payload = await callApi(semReferencia);
+    usedReference = false;
+    Object.assign(body, semReferencia);
+  }
 
   onProgress({ stage: 'decodificando o audio', pct: 85, detail: 'base64 -> mp3' });
 
@@ -406,6 +472,12 @@ export async function generateAceMusic(prompt, lyrics, style, options = {}) {
   meta.sampleMode = Boolean(body.sample_mode);
   meta.caption = meta.caption || buildCaption({ prompt, style, options });
   meta.requestId = payload?.id || null;
+  // audio de referencia: guarda de onde veio o estilo (sem o audio em si).
+  // `used: false` significa que a API recusou o arquivo e a faixa foi gerada
+  // sem ele (fallback dentro do provider).
+  meta.referenceAudio = reference
+    ? { ...referenceSummary(reference), used: usedReference }
+    : null;
 
   // salva o MP3 no servidor e devolve o caminho local para o player
   const id = options.trackId || newId('trk');
@@ -440,5 +512,8 @@ export function aceStepStatus() {
     baseURL: ACESTEP.baseURL,
     model: ACESTEP.model || '(padrao do servidor)',
     thinking: ACESTEP.thinking,
+    // audio de referencia (Audio-to-Audio / Style Transfer) via input_audio
+    referenceAudio: true,
+    referenceStrength: ACESTEP.referenceStrength,
   };
 }

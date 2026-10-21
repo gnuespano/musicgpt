@@ -70,15 +70,18 @@
       <div class="create-grid">
         <div class="panel panel-prompt">
           <div class="row row-quick">
-            <button class="btn btn-ghost" id="btnAddAudio" type="button" disabled title="Em breve">
+            <button class="btn btn-ghost" id="btnAddAudio" type="button" title="Anexar áudio de referência (o estilo e o timbre seguem o arquivo)">
               <svg viewBox="0 0 24 24"><path d="M14 3v11.2a3.5 3.5 0 1 1-2-3.16V5.6L6 7v9.2a3.5 3.5 0 1 1-2-3.16V5z"/></svg>
-              Áudio
+              Áudio ref.
             </button>
             <button class="btn btn-ghost" id="btnAddVoice" type="button">
               <svg viewBox="0 0 24 24"><path d="M12 14a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v5a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.9V21h2v-3.1A7 7 0 0 0 19 11z"/></svg>
               <span id="addVoiceLabel">Voz</span>
             </button>
           </div>
+
+          <!-- áudio de referência (Audio-to-Audio / Style Transfer) -->
+          <input type="file" id="referenceAudioInput" accept="audio/*" hidden />
 
           <!-- ---------- LETRA ---------- -->
           <section class="block">
@@ -117,6 +120,14 @@
             </div>
             <div class="block-body" id="bodyStyles">
               <textarea id="prompt" rows="5" placeholder="Descreva como você quer que sua música soe."></textarea>
+              <div class="ref-audio" id="refAudioBox" hidden>
+                <svg class="ref-audio-icon" viewBox="0 0 24 24"><path d="M14 3v11.2a3.5 3.5 0 1 1-2-3.16V5.6L6 7v9.2a3.5 3.5 0 1 1-2-3.16V5z"/></svg>
+                <span class="ref-audio-name" id="refAudioName"></span>
+                <span class="ref-audio-size" id="refAudioSize"></span>
+                <button class="icon-btn" id="btnRemoveRefAudio" type="button" title="Remover áudio de referência" aria-label="Remover áudio de referência">
+                  <svg viewBox="0 0 24 24"><path d="M18.3 5.7 12 12l6.3 6.3-1.4 1.4L10.6 13.4 4.3 19.7 2.9 18.3 9.2 12 2.9 5.7 4.3 4.3l6.3 6.3 6.3-6.3z"/></svg>
+                </button>
+              </div>
               <div class="chips" id="genreChips" role="group" aria-label="Gênero"></div>
               <div class="row row-2">
                 <label class="field">

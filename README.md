@@ -23,6 +23,7 @@ Sem build step, sem framework, sem bundler. Uma dependência (`@breezystack/lame
 | 5 | **Playlists e gerenciamento** | CRUD completo de playlists; faixas podem ser adicionadas/removidas; busca e filtro por gênero na biblioteca. |
 | 6 | **Biblioteca musical com IA** | Biblioteca persistente com waveform, BPM, tom, estrutura, plays; aba **Explorar** com ideias da comunidade e faixas publicadas. |
 | 7 | **Exportar e compartilhar** | Botão **"Baixar .wav"** e **"Baixar .mp3"** no painel de resultado, no card da faixa e no player; compartilhamento via Web Share API ou link copiado. O download resolve a **URL original do provider**, então funciona mesmo com o disco efêmero da nuvem (ver 5.2). |
+| 8 | **Áudio de referência (Audio-to-Audio / Style Transfer)** | Botão **"Áudio ref."** na tela *Criar*: anexe um arquivo de áudio e a música nova nasce **com o timbre/instrumentação do arquivo** (`server/upload.js` + `server/audio/reference.js` + `server/providers/acestep.js`). Ver 4.0.1. |
 
 ### Duração e camadas extras
 
@@ -114,6 +115,7 @@ musicgpt/
 │   ├── api.js              # handlers REST + SSE de progresso
 │   ├── config.js           # env, providers, caminhos
 │   ├── store.js            # persistência JSON (library, playlists, profile)
+│   ├── upload.js           # upload multipart do áudio de referência (multer)
 │   ├── lyrics.js           # gerador de letras (templates com concordância)
 │   ├── theory.js           # escalas, acordes, progressões, presets de gênero
 │   ├── providers/
@@ -126,12 +128,14 @@ musicgpt/
 │       ├── wav.js          # encode/decode WAV PCM16
 │       ├── mp3.js          # encode MP3 (lamejs)
 │       ├── remote.js       # download + parsing de duração de MP3/WAV
+│       ├── reference.js    # áudio de referência (base64 + formato p/ o ACE-Step)
 │       └── worker.js       # render em worker thread (servidor não trava)
 ├── public/                 # SPA (HTML + CSS + JS puro, sem build)
 ├── scripts/
 │   ├── gerar-certificado.mjs   # certificado self-signed para HTTPS local
 │   ├── lib/cdp.mjs             # cliente CDP compartilhado pelos testes
 │   ├── provar-acestep.mjs      # sonda: o que a API do ACE-Step devolve
+│   ├── testar-audio-referencia.mjs  # teste do upload do áudio de referência
 │   ├── testar-espectro.mjs     # teste do visualizador (Chromium headless + CDP)
 │   └── testar-download.mjs     # teste do download (disco efemero, MP3/WAV)
 └── data/                   # library.json, playlists.json, profile.json, tracks/
@@ -162,12 +166,12 @@ Cada faixa guarda os metadados: BPM, tom, estrutura, progressão, vozes cantadas
 ### Tela "Criar" (inspirada no Suno)
 
 ```
-[ + Áudio ]   [ + Voz ]
+[ Áudio ref. ]   [ + Voz ]
 ┌ Letra            ✨ ┐   varinha = gera a letra com IA
 │  textarea                toggle "Instrumental" dentro do bloco
 └─────────────────────────┘
 ┌ Estilos          ✨ ┐   varinha = sugere uma descrição de estilo
-│  textarea + chips de gênero + clima + caráter da voz
+│  textarea + faixa do áudio de referência + chips de gênero + clima + voz
 └─────────────────────────┘
 ┌ Mais opções          ┐
 │  Variedade (0-100, com marcas e rótulo: Mínima→Máxima)
@@ -178,6 +182,7 @@ Cada faixa guarda os metadados: BPM, tom, estrutura, progressão, vozes cantadas
 
 - **Variedade** (0–100) altera o arranjo no motor: densidade do arpejo, repetição da melodia, inversões de acorde e fills de bateria. 0 = parado e repetitivo, 100 = mais disperso (medido: 33% de diferença na forma de onda entre os extremos).
 - **+ Voz** abre o seletor: **Automático** (IA se houver chave), **Voz por IA (OpenRouter)** ou **Voz procedural (local)**, com 10 vozes (alloy, coral, onyx, ash, echo, fable, shimmer, nova, sage, verse).
+- **Áudio ref.** anexa um arquivo de áudio para a geração seguir o estilo/timbre dele (ver 4.0.1). O nome do arquivo aparece logo abaixo do campo de ideia, com botão para remover.
 
 ---
 
@@ -262,7 +267,9 @@ Ajuste o fator em `ACESTEP_DURATION_FACTOR` (1 = sem compensação). A duração
 | `ACESTEP_THINKING` | `1` | `1` = usa o LM 5Hz (qualidade); `0` = desliga. |
 | `ACESTEP_VOCAL_LANGUAGE` | vazio (usa o idioma do app) | Idioma do vocal (`en`, `pt`, `zh`, `ja`…). |
 | `ACESTEP_DURATION_FACTOR` | `2.3` | Compensação da duração (ver acima). |
+| `ACESTEP_REFERENCE_STRENGTH` | `0.3` | Peso do áudio de referência na geração (ver 4.0.1). |
 | `ACESTEP_TIMEOUT_MS` | `600000` | Timeout da geração. |
+| `MUSICGPT_MAX_REFERENCE_BYTES` | `15728640` (15 MB) | Tamanho máximo do áudio de referência enviado pelo app. |
 
 ### Fallbacks (o app nunca quebra)
 
@@ -273,6 +280,61 @@ Ajuste o fator em `ACESTEP_DURATION_FACTOR` (1 = sem compensação). A duração
 | `ACESTEP_MODEL` rejeitado pelo servidor | nova tentativa com os modelos alternativos (`acestep-v15-xl-turbo`, `acestep-v15-turbo`, `acemusic/acestep-v15-turbo`) |
 
 > O `ACESTEP_API_KEY=sua_chave_aqui` deixado no `.env` é tratado como **"não configurado"** — o app cai no motor procedural até você colar a chave real.
+
+### 4.0.1 Áudio de referência (Audio-to-Audio / Style Transfer)
+
+Anexe um arquivo de áudio e a música nova nasce **com o estilo do arquivo**: mesmo timbre, mesma instrumentação, mesma produção — mas com a letra, a melodia e a estrutura pedidas no prompt.
+
+**Na interface (tela *Criar*)**
+
+1. O botão **"Áudio ref."** (no topo do painel, ao lado de "Voz") abre o seletor de arquivos (`<input type="file" accept="audio/*">` escondido).
+2. Escolhido o arquivo, o **nome e o tamanho** aparecem numa faixa roxa logo abaixo do campo de ideia, com um botão **✕** para remover.
+3. Ao tocar em **Criar**, o app envia o pedido em `multipart/form-data` (o arquivo no campo `referenceAudio`); sem arquivo, continua enviando JSON — o fluxo "gerar do zero" **não muda**.
+
+**No servidor**
+
+| Camada | O que faz |
+|---|---|
+| `server/upload.js` | Lê o `multipart/form-data` com **multer** (`memoryStorage`, limite de 15 MB, só arquivos de áudio) e devolve `{ fields, file }`. |
+| `server/api.js` | A rota `POST /api/generate` aceita **JSON ou multipart** (os campos de texto do multipart chegam como string e são normalizados — `instrumental: "false"` não vira `true`). |
+| `server/audio/reference.js` | Descobre o formato do arquivo (MIME/extensão: mp3, wav, ogg, m4a, aac, flac, webm, aiff) e monta o payload base64. |
+| `server/providers/acestep.js` | Monta a mensagem **multimodal** e envia para a API do ACE-Step. |
+
+**O pedido para o ACE-Step**
+
+```json
+{
+  "messages": [{
+    "role": "user",
+    "content": [
+      { "type": "text", "text": "<prompt>MPB melancólica, about 69 seconds</prompt>" },
+      { "type": "input_audio", "input_audio": { "data": "<base64 do arquivo>", "format": "wav" } }
+    ]
+  }],
+  "task_type": "text2music",
+  "audio_cover_strength": 0.3,
+  "audio_config": { "format": "mp3", "instrumental": false, "duration": 69 }
+}
+```
+
+- Com `task_type: "text2music"` o áudio enviado vira a **referência de estilo** (a API encaminha o primeiro bloco `input_audio` para `reference_audio`).
+- `audio_cover_strength` é o quanto a referência pesa: `0` = ignora o estilo do arquivo, `1` = segue o áudio de perto. A documentação do ACE-Step recomenda `0.2` para transferência de estilo pura; o app usa `0.3` (`ACESTEP_REFERENCE_STRENGTH`).
+
+**Fallbacks**
+
+| Situação | Comportamento |
+|---|---|
+| Sem arquivo anexado | fluxo normal (JSON), geração do zero — **inalterado**. |
+| Motor local (sem chave do ACE-Step) | a faixa é gerada sem referência e o card mostra o aviso "Áudio de referência ignorado: ele precisa do motor ACE-Step…". |
+| API recusa o arquivo (400/413/415/422) | nova tentativa **sem** a referência (a faixa não se perde) e a faixa fica marcada com `used: false`. |
+| Arquivo que não é áudio (ou grande demais) | `400` com mensagem clara; o app mostra o erro e não manda a geração. |
+
+**Teste**
+
+```bash
+npm run test:referencia              # sobe o próprio servidor (motor local) e confere o fluxo todo
+MUSICGPT_TESTE_LIVE=1 npm run test:referencia   # gera de verdade no ACE-Step com áudio de referência
+```
 
 ---
 
@@ -338,7 +400,7 @@ Variáveis: `OPENROUTER_LYRICS_MODEL`, `OPENROUTER_TTS_MODEL`, `OPENROUTER_TTS_V
 |---|---|---|
 | `GET` | `/api/health` | estado do servidor e providers ativos |
 | `GET` | `/api/config` | gêneros, climas, vozes, providers |
-| `POST` | `/api/generate` | cria um job → `{ jobId }` |
+| `POST` | `/api/generate` | cria um job → `{ jobId }` (JSON **ou** `multipart/form-data` com o campo `referenceAudio`) |
 | `GET` | `/api/jobs/:id` | status do job |
 | `GET` | `/api/jobs/:id/events` | **SSE** com progresso em tempo real |
 | `POST` | `/api/lyrics` | `{ mode: 'full' \| 'next' }` → letra ou próxima linha |
@@ -363,6 +425,15 @@ curl -X POST localhost:8787/api/generate \
   -d '{"prompt":"MPB melancólico sobre saudade de uma casa antiga","duration":60}'
 ```
 
+Com áudio de referência (Audio-to-Audio / Style Transfer):
+
+```bash
+curl -X POST localhost:8787/api/generate \
+  -F 'prompt=MPB melancólico no mesmo timbre da referência' \
+  -F 'duration=60' \
+  -F 'referenceAudio=@minha-musica.mp3'
+```
+
 ---
 
 ## 6. Rodando
@@ -372,10 +443,10 @@ cd musicgpt
 npm install          # só o encoder de MP3
 npm start            # porta 8787 (PORT=xxxx para trocar)
 npm run dev          # com --watch
-npm test             # testes locais (espectro + download) - servidor precisa estar no ar
+npm test             # testes locais (referência + espectro + download) - servidor precisa estar no ar
 ```
 
-Variáveis úteis: `PORT`, `HOST`, `MUSICGPT_DATA_DIR`, `MUSICGPT_MUSIC_PROVIDER`, `MUSICGPT_LYRICS_PROVIDER`, `MUSICGPT_TTS_PROVIDER`, `ACESTEP_API_KEY`, `ACESTEP_BASE_URL`, `ACESTEP_MODEL`, `ACESTEP_THINKING`, `ACESTEP_VOCAL_LANGUAGE`, `ACESTEP_DURATION_FACTOR`, `ACESTEP_TIMEOUT_MS`, `REPLICATE_API_TOKEN`, `FAL_KEY`, `OPENAI_API_KEY`, `OPENROUTER_API_KEY`, `MUSICGPT_SSL_CERT`, `MUSICGPT_SSL_KEY`.
+Variáveis úteis: `PORT`, `HOST`, `MUSICGPT_DATA_DIR`, `MUSICGPT_MUSIC_PROVIDER`, `MUSICGPT_LYRICS_PROVIDER`, `MUSICGPT_TTS_PROVIDER`, `ACESTEP_API_KEY`, `ACESTEP_BASE_URL`, `ACESTEP_MODEL`, `ACESTEP_THINKING`, `ACESTEP_VOCAL_LANGUAGE`, `ACESTEP_DURATION_FACTOR`, `ACESTEP_REFERENCE_STRENGTH`, `ACESTEP_TIMEOUT_MS`, `MUSICGPT_MAX_REFERENCE_BYTES`, `REPLICATE_API_TOKEN`, `FAL_KEY`, `OPENAI_API_KEY`, `OPENROUTER_API_KEY`, `MUSICGPT_SSL_CERT`, `MUSICGPT_SSL_KEY`.
 
 ### Porta
 
@@ -469,3 +540,4 @@ Verificado no Chromium: SW `activated` com escopo `/`, 10 itens no precache, `co
 - O **gerador local de letras** é template-based: garante métrica, estrutura e concordância, mas não rhyme complexo nem semântica profunda. Com o ACE-Step, quem escreve a letra é o **LM 5Hz** (sample mode) ou o OpenRouter, se você religá-lo.
 - Faixas em **WAV** ocupam ~10 MB/min no disco; o MP3 (~1,2 MB/min) é gerado sob demanda.
 - Durações curtas (abaixo de ~25 s) ficam limitadas pela estrutura mínima (20 compassos), então o resultado é sempre um pouco mais longo que o pedido.
+- O **áudio de referência** só tem efeito com o motor **ACE-Step** (é ele que sabe usar a referência de estilo). O motor procedural local ignora o arquivo e avisa no card da faixa. O arquivo não é cortado nem processado: vai inteiro em base64 no pedido (limite de 15 MB).
