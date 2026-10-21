@@ -382,10 +382,18 @@ export async function generateAceMusic(prompt, lyrics, style, options = {}) {
 
   let buffer;
   let format = found.format;
+  let sourceUrl = null;
   if (found.kind === 'base64') {
     buffer = Buffer.from(found.value, 'base64');
     if (buffer.length < 128) throw new Error('ACE-Step devolveu audio vazio');
+    // a API devolve o audio como data URL (base64). Guardamos essa "URL
+    // original" nos metadados: no deploy com disco efemero o arquivo local
+    // some, mas o download continua funcionando por ela.
+    if (ACESTEP.keepSourceAudio) {
+      sourceUrl = `data:${format === 'wav' ? 'audio/wav' : 'audio/mpeg'};base64,${found.value}`;
+    }
   } else {
+    sourceUrl = found.value;
     buffer = await downloadBuffer(found.value);
     format = /\.wav(\?|$)/i.test(found.value) ? 'wav' : 'mp3';
   }
@@ -415,7 +423,13 @@ export async function generateAceMusic(prompt, lyrics, style, options = {}) {
     file,
     path: audioPath(file),
     peaks,
-    meta,
+    sourceUrl,
+    sourceFormat: format,
+    meta: {
+      ...meta,
+      sourceUrl,
+      sourceFormat: format,
+    },
   };
 }
 

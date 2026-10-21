@@ -84,7 +84,10 @@ export async function generateWithReplicate(options, onProgress) {
     buffer,
     format: 'mp3',
     duration: mp3Duration(buffer) || options.duration || 75,
-    meta: { engine: 'replicate', model, remoteId: prediction.id },
+    // URL original do provider: o download funciona mesmo sem o disco
+    sourceUrl: url,
+    sourceFormat: 'mp3',
+    meta: { engine: 'replicate', model, remoteId: prediction.id, sourceUrl: url },
   };
 }
 
@@ -113,7 +116,10 @@ export async function generateWithFal(options, onProgress) {
     buffer,
     format: 'mp3',
     duration: mp3Duration(buffer) || options.duration || 75,
-    meta: { engine: 'fal', model },
+    // URL original do provider: o download funciona mesmo sem o disco
+    sourceUrl: url,
+    sourceFormat: 'mp3',
+    meta: { engine: 'fal', model, sourceUrl: url },
   };
 }
 

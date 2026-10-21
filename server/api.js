@@ -23,6 +23,13 @@ import { voiceOver, resolveTtsVoice } from './audio/voice.js';
 import { detectGenre, detectMood, MAX_DURATION_SEC } from './audio/render.js';
 import { encodeMp3, mp3Available } from './audio/mp3.js';
 import { mp3Duration, wavDuration } from './audio/remote.js';
+import {
+  convertAudio,
+  readSource,
+  resolveSource,
+  sendAttachment,
+  sendRemoteProxy,
+} from './audio/delivery.js';
 
 const jobs = new Map();
 const workerFile = new URL('./audio/worker.js', import.meta.url);
@@ -76,6 +83,21 @@ function titleFromPrompt(prompt, genre) {
 function trackById(id) {
   const lib = store.library();
   return lib.tracks.find((t) => t.id === id) || null;
+}
+
+/**
+ * Versao da faixa segura para o cliente.
+ *
+ * A `sourceUrl` guarda o audio original do provider (data URL do ACE-Step
+ * com megabytes de base64, ou URL https). Ela e do servidor: nunca vai
+ * para o browser, senao a biblioteca viraria um arquivo gigante.
+ */
+export function publicTrack(track) {
+  if (!track) return track;
+  const { sourceUrl, ...rest } = track;
+  // `hasSource` diz se a faixa ainda tem a URL original do provider (util
+  // para a UI saber que o download nao depende do disco), sem expor o audio.
+  return { ...rest, hasSource: Boolean(sourceUrl) };
 }
 
 /* ------------------------------------------------------------------ *
@@ -295,6 +317,11 @@ async function executeJob(job, options) {
       provider: effectiveProvider,
       format,
       file: relative,
+      // URL original do audio no provider (data URL do ACE-Step ou https do
+      // Replicate/fal). E o que permite baixar a faixa mesmo quando o disco
+      // efemero do host foi recriado.
+      sourceUrl: result.sourceUrl || result.meta?.sourceUrl || null,
+      sourceFormat: result.sourceFormat || result.meta?.sourceFormat || format,
       peaks: result.peaks || [],
       tags: [options.genreLabel, options.moodLabel, options.lofi ? 'chuva' : null].filter(Boolean),
       createdAt: now,
@@ -307,7 +334,7 @@ async function executeJob(job, options) {
     lib.tracks.unshift(track);
     store.saveLibrary(lib);
 
-    emit({ status: 'done', progress: 100, stage: 'pronto', track });
+    emit({ status: 'done', progress: 100, stage: 'pronto', track: publicTrack(track) });
   } catch (error) {
     emit({ status: 'error', stage: 'erro', progress: 100, error: error?.message || String(error) });
   }
@@ -465,13 +492,13 @@ export const handlers = {
 
   listTracks(_req, res) {
     const lib = store.library();
-    return json(res, 200, { tracks: lib.tracks });
+    return json(res, 200, { tracks: lib.tracks.map(publicTrack) });
   },
 
   getTrack(req, res, params) {
     const track = trackById(params.id);
     if (!track) return json(res, 404, { error: 'Faixa nao encontrada' });
-    return json(res, 200, { track });
+    return json(res, 200, { track: publicTrack(track) });
   },
 
   deleteTrack(req, res, params) {
@@ -525,42 +552,50 @@ export const handlers = {
   },
 
   /**
-   * GET /api/download/:id
-   * Envia o audio gerado como arquivo WAV para download (Content-Disposition:
-   * attachment). O master em disco e exatamente o buffer gerado pelo motor de
-   * sintese, entao o arquivo baixado e a faixa original, sem re-encode.
+   * GET /api/download/:id?format=mp3|wav[&source=auto|remote|local]
+   *
+   * Baixa o audio da faixa como anexo (Content-Disposition: attachment).
+   *
+   * A fonte NAO depende do disco local: quando a faixa tem a `audio_url`
+   * original do provider (data URL do ACE-Step ou URL https do
+   * Replicate/fal), o arquivo e servido a partir dela - assim o download
+   * continua funcionando depois de um restart/deploy que recriou o disco.
+   * Sem a URL original, cai para o arquivo em data/tracks.
+   *
+   * O formato pedido e garantido: WAV -> MP3 e convertido com lamejs,
+   * MP3 -> WAV e decodificado (@audio/decode-mp3).
    */
-  downloadWav(req, res, params) {
+  async download(req, res, params) {
     const track = trackById(params.id);
     if (!track) return json(res, 404, { error: 'Faixa nao encontrada' });
 
-    if (track.format !== 'wav') {
-      return json(res, 409, {
-        error: 'Esta faixa veio de um provider remoto e nao possui WAV local. Use o download em MP3.',
+    const url = new URL(req.url, 'http://localhost');
+    const format = (url.searchParams.get('format') || 'wav').toLowerCase() === 'mp3' ? 'mp3' : 'wav';
+    const prefer = (url.searchParams.get('source') || 'auto').toLowerCase();
+
+    const source = resolveSource(track, prefer);
+    if (!source) {
+      return json(res, 410, {
+        error: 'O audio desta faixa nao esta mais disponivel: o disco do servidor foi recriado e o provider nao devolveu uma URL original. Gere a faixa novamente.',
       });
     }
 
-    const filePath = audioPath(track.file);
-    let stat;
+    const filename = `${track.slug || track.id}.${format}`;
+
     try {
-      stat = fs.statSync(filePath);
-    } catch {
-      return json(res, 410, { error: 'Arquivo de audio nao encontrado no disco.' });
+      // proxy direto: o arquivo remoto ja esta no formato pedido
+      if (source.kind === 'remote' && source.format === format) {
+        return await sendRemoteProxy(res, source.url, filename, format);
+      }
+
+      const { buffer, format: sourceFormat } = await readSource(source);
+      const out = await convertAudio(buffer, sourceFormat, format);
+      return sendAttachment(res, out, filename, format);
+    } catch (err) {
+      return json(res, 502, {
+        error: `Nao foi possivel baixar o audio: ${err.message}`,
+      });
     }
-
-    const rawName = `${track.slug || track.id}.wav`;
-    const asciiName = rawName.replace(/[^\x20-\x7E]/g, '_').replace(/"/g, '');
-    const encoded = encodeURIComponent(rawName);
-
-    res.writeHead(200, {
-      'Content-Type': 'audio/wav',
-      'Content-Length': stat.size,
-      'Content-Disposition': `attachment; filename="${asciiName}"; filename*=UTF-8''${encoded}`,
-      'Accept-Ranges': 'bytes',
-      'Cache-Control': 'private, max-age=3600',
-      'X-Track-Id': track.id,
-    });
-    return fs.createReadStream(filePath).pipe(res);
   },
 
   async audio(req, res, params) {
@@ -570,9 +605,41 @@ export const handlers = {
     const format = (url.searchParams.get('format') || track.format).toLowerCase();
     const download = url.searchParams.get('download') === '1';
 
-    let filePath = audioPath(track.file);
+    let filePath = track.file ? audioPath(track.file) : null;
     let contentType = track.format === 'mp3' ? 'audio/mpeg' : 'audio/wav';
     let filename = `${track.slug || track.id}.${track.format}`;
+
+    const localExists = (() => {
+      if (!filePath) return false;
+      try { return fs.statSync(filePath).isFile(); } catch { return false; }
+    })();
+
+    // disco efemero: o arquivo local pode ter sumido (restart/deploy).
+    // nesse caso a faixa ainda tem a URL original do provider.
+    if (!localExists) {
+      const source = resolveSource(track, 'remote');
+      if (!source) {
+        return json(res, 410, { error: 'Arquivo de audio nao encontrado no disco e sem URL original do provider.' });
+      }
+      try {
+        if (source.kind === 'remote' && source.format === format) {
+          return await sendRemoteProxy(res, source.url, filename, source.format, { 'Accept-Ranges': 'none' });
+        }
+        const { buffer, format: sourceFormat } = await readSource(source);
+        const out = await convertAudio(buffer, sourceFormat, format === 'wav' ? 'wav' : 'mp3');
+        contentType = format === 'mp3' ? 'audio/mpeg' : 'audio/wav';
+        filename = `${track.slug || track.id}.${format}`;
+        res.writeHead(200, {
+          'Content-Type': contentType,
+          'Content-Length': out.length,
+          'Cache-Control': 'private, max-age=3600',
+          ...(download ? { 'Content-Disposition': `attachment; filename="${filename}"` } : {}),
+        });
+        return res.end(out);
+      } catch (err) {
+        return json(res, 502, { error: `Nao foi possivel servir o audio: ${err.message}` });
+      }
+    }
 
     if (format === 'mp3' && track.format !== 'mp3') {
       if (!mp3Available()) return json(res, 501, { error: 'Encoder MP3 indisponivel neste host.' });
@@ -689,7 +756,7 @@ export const handlers = {
     const lib = store.library();
     const community = lib.tracks.filter((t) => t.isPublic);
     const ideas = loadCommunityIdeas();
-    return json(res, 200, { tracks: community, ideas });
+    return json(res, 200, { tracks: community.map(publicTrack), ideas });
   },
 
   share(req, res, params) {

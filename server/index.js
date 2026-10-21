@@ -43,7 +43,7 @@ const ROUTES = [
   ['POST', '/api/tracks/:id/like', handlers.likeTrack],
   ['POST', '/api/tracks/:id/publish', handlers.publishTrack],
   ['GET', '/api/tracks/:id/audio', handlers.audio],
-  ['GET', '/api/download/:id', handlers.downloadWav],
+  ['GET', '/api/download/:id', handlers.download],
   ['GET', '/api/tracks/:id/share', handlers.share],
   ['GET', '/api/playlists', handlers.listPlaylists],
   ['POST', '/api/playlists', handlers.createPlaylist],

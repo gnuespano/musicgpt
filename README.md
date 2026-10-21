@@ -22,7 +22,7 @@ Sem build step, sem framework, sem bundler. Uma dependência (`@breezystack/lame
 | 4 | **Player de música inteligente** | Barra inferior: play/pause, anterior/próxima, seek clicável, volume, mute, aleatório, repetir, fila, export e compartilhamento — mais o **visualizador de espectro** em tempo real (Web Audio API). |
 | 5 | **Playlists e gerenciamento** | CRUD completo de playlists; faixas podem ser adicionadas/removidas; busca e filtro por gênero na biblioteca. |
 | 6 | **Biblioteca musical com IA** | Biblioteca persistente com waveform, BPM, tom, estrutura, plays; aba **Explorar** com ideias da comunidade e faixas publicadas. |
-| 7 | **Exportar e compartilhar** | Botão **"Baixar .wav"** no painel de resultado (ao lado de "Ouvir agora"), no card da faixa (ao lado do play) e no player; **"Baixar MP3"** com cache em disco; compartilhamento via Web Share API ou link copiado. |
+| 7 | **Exportar e compartilhar** | Botão **"Baixar .wav"** e **"Baixar .mp3"** no painel de resultado, no card da faixa e no player; compartilhamento via Web Share API ou link copiado. O download resolve a **URL original do provider**, então funciona mesmo com o disco efêmero da nuvem (ver 5.2). |
 
 ### Duração e camadas extras
 
@@ -53,6 +53,56 @@ Teste automatizado (Chromium headless via CDP, 21 verificações):
 npm test              # precisa do servidor no ar (npm start)
 ```
 
+### 5.2 Download sem depender do disco (deploy na nuvem)
+
+No Render (plano free) o disco é **efêmero**: o arquivo em `data/tracks/` some no próximo deploy. A rota de download não pode, portanto, depender do disco.
+
+**Como funciona.** Cada faixa guarda a `audio_url` original devolvida pelo provider:
+
+| Provider | O que a API devolve | O que é salvo em `track.sourceUrl` |
+|---|---|---|
+| ACE-Step 1.5 | `choices[0].message.audio[0].audio_url.url` = **data URL** (`data:audio/mpeg;base64,…`) | a própria data URL (o audio inteiro) |
+| Replicate | URL https do arquivo gerado | a URL https |
+| fal | URL https do arquivo gerado | a URL https |
+| motor local | — (o áudio nasce no servidor) | — (usa o arquivo local) |
+
+A rota `GET /api/download/:id` resolve a fonte assim:
+
+```
+1. sourceUrl original  ->  data URL (decodifica) ou https (faz proxy do arquivo)
+2. data/tracks/<file>  ->  fallback: o mesmo audio em cache local
+```
+
+E garante o **formato pedido**:
+
+| Pedido | Fonte MP3 | Fonte WAV |
+|---|---|---|
+| `?format=mp3` | served como está | convertido com **lamejs** (160 kbps) |
+| `?format=wav` | decodificado (`@audio/decode-mp3`) e re-encodado em WAV | served como está |
+
+A resposta sempre leva `Content-Disposition: attachment; filename="<slug>.mp3"` (mais `filename*=UTF-8''…` para títulos com acento), e o player (`/api/tracks/:id/audio`) também cai para a URL original quando o arquivo local some.
+
+```bash
+curl -OJ "localhost:8787/api/download/trk_xxx?format=mp3"   # baixa o MP3
+curl -OJ "localhost:8787/api/download/trk_xxx?format=wav"   # baixa o WAV
+curl -OJ "localhost:8787/api/download/trk_xxx?format=mp3&source=remote"  # força a URL original
+```
+
+> A `sourceUrl` **nunca** vai para o browser: a API devolve só um `hasSource: true`. Sem isso, a biblioteca viraria um arquivo de megabytes de base64.
+
+**Variáveis:**
+
+| Variável | Padrão | Efeito |
+|---|---|---|
+| `MUSICGPT_KEEP_SOURCE_AUDIO` | `1` | `0` = não guarda a data URL do ACE-Step (biblioteca fica leve, mas o download volta a depender do arquivo local) |
+
+Teste automatizado (17 verificações, inclui o cenário de disco efêmero e o download real no navegador):
+
+```bash
+npm run test:download
+MUSICGPT_TEST_RESTART=1 npm run test:download   # confere o download depois de reiniciar o servidor
+```
+
 ---
 
 ## 2. Arquitetura
@@ -80,7 +130,10 @@ musicgpt/
 ├── public/                 # SPA (HTML + CSS + JS puro, sem build)
 ├── scripts/
 │   ├── gerar-certificado.mjs   # certificado self-signed para HTTPS local
-│   └── testar-espectro.mjs     # teste do visualizador (Chromium headless + CDP)
+│   ├── lib/cdp.mjs             # cliente CDP compartilhado pelos testes
+│   ├── provar-acestep.mjs      # sonda: o que a API do ACE-Step devolve
+│   ├── testar-espectro.mjs     # teste do visualizador (Chromium headless + CDP)
+│   └── testar-download.mjs     # teste do download (disco efemero, MP3/WAV)
 └── data/                   # library.json, playlists.json, profile.json, tracks/
 ```
 
@@ -183,7 +236,7 @@ ACESTEP_API_KEY=sk-...
 - **`vocal_language`**: vem do idioma do app (`pt`/`en`). Sem isso o LM canta em inglês mesmo com prompt em português (medido: `"Language: en"` → com `pt`, `"Language: pt"` e letra em português).
 - **resposta**: `choices[0].message.audio[0].audio_url.url` = `data:audio/mpeg;base64,…`.
 
-3. O base64 é **decodificado**, salvo em `data/tracks/<id>.mp3` e devolvido com o **caminho local** — o player usa a rota `/api/tracks/:id/audio` (com suporte a `Range`), igual às faixas do motor local.
+3. O base64 é **decodificado**, salvo em `data/tracks/<id>.mp3` e devolvido com o **caminho local** — o player usa a rota `/api/tracks/:id/audio` (com suporte a `Range`), igual às faixas do motor local. A `audio_url` original (a própria data URL) também fica guardada em `track.sourceUrl`, para que o **download não dependa do disco** na nuvem (ver 5.2).
 4. BPM, tom e duração são lidos dos metadados que o LM escreveu (`**BPM:**`, `**Key:**`, `**Duration:**`) e exibidos no card da faixa.
 
 ### Duração: o host entrega ~43% do tempo planejado
@@ -294,8 +347,8 @@ Variáveis: `OPENROUTER_LYRICS_MODEL`, `OPENROUTER_TTS_MODEL`, `OPENROUTER_TTS_V
 | `DELETE` | `/api/tracks/:id` | exclui faixa e arquivo |
 | `POST` | `/api/tracks/:id/play` | conta play |
 | `POST` | `/api/tracks/:id/publish` | publica/despublica na comunidade |
-| `GET` | `/api/tracks/:id/audio?format=wav\|mp3&download=1` | stream com **Range** ou download |
-| `GET` | `/api/download/:id` | **download do WAV**: envia o áudio gerado como arquivo (`Content-Disposition: attachment`) |
+| `GET` | `/api/tracks/:id/audio?format=wav\|mp3&download=1` | stream com **Range** ou download (cai para a URL original se o disco sumiu) |
+| `GET` | `/api/download/:id?format=wav\|mp3&source=auto\|remote\|local` | **download do áudio** (`Content-Disposition: attachment`), sem depender do disco (ver 5.2) |
 | `GET` | `/api/tracks/:id/share` | payload de compartilhamento |
 | `GET/POST` | `/api/playlists` | lista / cria |
 | `PATCH/DELETE` | `/api/playlists/:id` | edita / exclui |
@@ -319,7 +372,7 @@ cd musicgpt
 npm install          # só o encoder de MP3
 npm start            # porta 8787 (PORT=xxxx para trocar)
 npm run dev          # com --watch
-npm test             # teste do visualizador de espectro (servidor precisa estar no ar)
+npm test             # testes locais (espectro + download) - servidor precisa estar no ar
 ```
 
 Variáveis úteis: `PORT`, `HOST`, `MUSICGPT_DATA_DIR`, `MUSICGPT_MUSIC_PROVIDER`, `MUSICGPT_LYRICS_PROVIDER`, `MUSICGPT_TTS_PROVIDER`, `ACESTEP_API_KEY`, `ACESTEP_BASE_URL`, `ACESTEP_MODEL`, `ACESTEP_THINKING`, `ACESTEP_VOCAL_LANGUAGE`, `ACESTEP_DURATION_FACTOR`, `ACESTEP_TIMEOUT_MS`, `REPLICATE_API_TOKEN`, `FAL_KEY`, `OPENAI_API_KEY`, `OPENROUTER_API_KEY`, `MUSICGPT_SSL_CERT`, `MUSICGPT_SSL_KEY`.
@@ -359,7 +412,7 @@ O que precisa de atenção:
 | Item | Orientação |
 |---|---|
 | **Chaves** | o `.env` está no `.gitignore` e **não vai para o Render**. Cadastre `ACESTEP_API_KEY` (e, se quiser, `OPENROUTER_API_KEY`) em **Environment** no painel do Render. |
-| **Dados** | `data/` (biblioteca, faixas) fica no disco efêmero do plano free: as faixas somem no próximo deploy. Para persistir, use um disco (`/mnt/data`) e aponte `MUSICGPT_DATA_DIR=/mnt/data`. |
+| **Dados** | `data/` (biblioteca, faixas) fica no disco efêmero do plano free: as faixas somem no próximo deploy. Para persistir, use um disco (`/mnt/data`) e aponte `MUSICGPT_DATA_DIR=/mnt/data`. Mesmo sem disco, o **download** e a **reprodução** continuam funcionando enquanto a faixa tiver a URL original do provider (ver 5.2). |
 | **Frio** | o plano free hiberna após inatividade: a primeira requisição demora (e uma geração do ACE-Step leva ~30 s). |
 | **Timeout** | geração longa → o proxy do Render pode cortar a conexão; o app continua o job em background e a faixa aparece na biblioteca. |
 

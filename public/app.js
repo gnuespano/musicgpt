@@ -268,13 +268,16 @@ function watchJob(jobId, btn) {
         toast(track.warnings[0], 'error');
       }
       $('#btnPlayDone').onclick = () => playTrack(track);
-      // download do WAV gerado: a rota devolve o buffer de audio como arquivo
+      // download do audio gerado: a rota /api/download resolve a fonte
+      // (URL original do provider ou arquivo local) e converte o formato
       const wavBtn = $('#btnDownloadDone');
       wavBtn.onclick = () => downloadWav(track);
-      wavBtn.disabled = track.format !== 'wav';
-      wavBtn.title = track.format === 'wav'
-        ? 'Baixar o audio gerado em .wav'
-        : 'WAV local indisponivel (faixa vinda de provider remoto)';
+      wavBtn.disabled = false;
+      wavBtn.title = 'Baixar o audio gerado em .wav';
+      const mp3Btn = $('#btnDownloadMp3Done');
+      mp3Btn.onclick = () => downloadTrack(track);
+      mp3Btn.disabled = false;
+      mp3Btn.title = 'Baixar o audio gerado em .mp3';
       $('#btnOpenDone').onclick = () => { showView('biblioteca'); loadTracks(); };
       // reflete o genero/clima efetivamente usados (podem ter sido detectados pelo prompt)
       const usedChip = $(`#genreChips .chip[data-genre="${track.genre}"]`);
@@ -433,7 +436,7 @@ function trackCard(t) {
     <div class="track-actions">
       <button class="icon-btn is-primary" data-act="play" title="Tocar">${ICON.play}</button>
       <button class="icon-btn" data-act="download-wav" title="Baixar .wav">${ICON.wave}</button>
-      <button class="icon-btn" data-act="download" title="Baixar MP3">${ICON.download}</button>
+      <button class="icon-btn" data-act="download" title="Baixar .mp3">${ICON.download}</button>
       <button class="icon-btn" data-act="playlist" title="Adicionar à playlist">${ICON.plus}</button>
       <button class="icon-btn" data-act="share" title="Compartilhar">${ICON.share}</button>
       <button class="icon-btn" data-act="publish" title="Publicar na comunidade">${ICON.publish}</button>
@@ -475,7 +478,7 @@ async function deleteTrack(track) {
 
 /**
  * Baixa um arquivo tratando a resposta como blob, para conseguir tratar erro
- * (a API responde JSON quando a faixa nao tem WAV local, por exemplo).
+ * (a API responde JSON quando o audio nao esta disponivel, por exemplo).
  */
 async function downloadFile(url, filename, label = 'Download') {
   try {
@@ -490,10 +493,11 @@ async function downloadFile(url, filename, label = 'Download') {
       return;
     }
     const blob = await res.blob();
+    const name = filenameFromDisposition(res.headers.get('Content-Disposition'), filename);
     const objUrl = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = objUrl;
-    a.download = filename;
+    a.download = name;
     document.body.appendChild(a);
     a.click();
     a.remove();
@@ -504,12 +508,23 @@ async function downloadFile(url, filename, label = 'Download') {
   }
 }
 
+/** Le o nome do arquivo do header Content-Disposition do servidor. */
+function filenameFromDisposition(header, fallback) {
+  if (!header) return fallback;
+  const utf8 = /filename\*=UTF-8''([^;]+)/i.exec(header);
+  if (utf8) {
+    try { return decodeURIComponent(utf8[1].trim()); } catch { /* ignora */ }
+  }
+  const plain = /filename="?([^";]+)"?/i.exec(header);
+  return plain ? plain[1].trim() : fallback;
+}
+
 function downloadWav(track) {
-  return downloadFile(`/api/download/${track.id}`, `${track.slug || track.id}.wav`, 'Download do WAV');
+  return downloadFile(`/api/download/${track.id}?format=wav`, `${track.slug || track.id}.wav`, 'Download do WAV');
 }
 
 function downloadTrack(track) {
-  return downloadFile(`/api/tracks/${track.id}/audio?format=mp3`, `${track.slug || track.id}.mp3`, 'Download do MP3');
+  return downloadFile(`/api/download/${track.id}?format=mp3`, `${track.slug || track.id}.mp3`, 'Download do MP3');
 }
 
 async function shareTrack(track) {

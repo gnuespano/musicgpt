@@ -11,95 +11,14 @@
  * Uso: node scripts/testar-espectro.mjs   (o servidor precisa estar no ar)
  */
 
-import { spawn } from 'node:child_process';
 import { setTimeout as delay } from 'node:timers/promises';
-import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { launchChrome, realClick, screenshot, createReporter } from './lib/cdp.mjs';
 
 const APP_URL = process.env.MUSICGPT_URL || 'http://localhost:8787';
-const CDP_PORT = Number(process.env.CDP_PORT || 9333);
-const CHROME = process.env.CHROME_BIN || 'chromium';
-
-const C = { g: '\x1b[32m', r: '\x1b[31m', y: '\x1b[33m', d: '\x1b[2m', x: '\x1b[0m' };
-
-const results = [];
-function check(name, ok, detail = '') {
-  results.push({ name, ok, detail });
-  console.log(`${ok ? `${C.g}PASS${C.x}` : `${C.r}FALHA${C.x}`} ${name}${detail ? ` ${C.d}(${detail})${C.x}` : ''}`);
-  return ok;
-}
-
-/* ------------------------------------------------------------------ *
- * Cliente CDP minimo (WebSocket nativo do Node 22)
- * ------------------------------------------------------------------ */
-
-class CDP {
-  constructor(ws) {
-    this.ws = ws;
-    this.seq = 0;
-    this.pending = new Map();
-    this.errors = [];
-  }
-
-  static async connect(url) {
-    const ws = new WebSocket(url);
-    await new Promise((resolve, reject) => {
-      ws.addEventListener('open', resolve, { once: true });
-      ws.addEventListener('error', () => reject(new Error(`falha ao conectar em ${url}`)), { once: true });
-    });
-    const cdp = new CDP(ws);
-    ws.addEventListener('message', (ev) => {
-      const msg = JSON.parse(ev.data);
-      if (msg.method === 'Runtime.exceptionThrown') {
-        const d = msg.params.exceptionDetails;
-        cdp.errors.push(d.exception?.description || d.text || 'erro desconhecido');
-      }
-      if (msg.method === 'Log.entryAdded' && msg.params.entry.level === 'error') {
-        cdp.errors.push(msg.params.entry.text);
-      }
-      const pending = msg.id ? cdp.pending.get(msg.id) : null;
-      if (!pending) return;
-      cdp.pending.delete(msg.id);
-      if (msg.error) pending.reject(new Error(`${pending.method}: ${msg.error.message}`));
-      else pending.resolve(msg.result);
-    });
-    return cdp;
-  }
-
-  send(method, params = {}) {
-    const id = ++this.seq;
-    return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => {
-        this.pending.delete(id);
-        reject(new Error(`timeout em ${method}`));
-      }, 30000);
-      this.pending.set(id, {
-        method,
-        resolve: (v) => { clearTimeout(timer); resolve(v); },
-        reject: (e) => { clearTimeout(timer); reject(e); },
-      });
-      this.ws.send(JSON.stringify({ id, method, params }));
-    });
-  }
-
-  async eval(fnSource) {
-    const res = await this.send('Runtime.evaluate', {
-      expression: `(${fnSource})()`,
-      awaitPromise: true,
-      returnByValue: true,
-    });
-    if (res.exceptionDetails) {
-      const d = res.exceptionDetails;
-      throw new Error(`excecao na pagina: ${d.exception?.description || d.text}`);
-    }
-    return res.result.value;
-  }
-}
-
-/* ------------------------------------------------------------------ *
- * Helpers de pagina
- * ------------------------------------------------------------------ */
+const report = createReporter();
+const { check } = report;
 
 /** Mede o quadro atual do canvas: pixels pintados, altura das barras e hash. */
 const CANVAS_STATS = `() => {
@@ -130,72 +49,11 @@ const CANVAS_STATS = `() => {
   };
 }`;
 
-/** Clique real (gera ativacao de usuario para a Web Audio API). */
-async function realClick(cdp, selector) {
-  const box = await cdp.eval(`(() => {
-    const el = document.querySelector(${JSON.stringify(selector)});
-    if (!el) return null;
-    el.scrollIntoView({ block: 'center' });
-    const r = el.getBoundingClientRect();
-    return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
-  })`);
-  if (!box) throw new Error(`elemento nao encontrado: ${selector}`);
-  for (const type of ['mousePressed', 'mouseReleased']) {
-    await cdp.send('Input.dispatchMouseEvent', {
-      type, x: box.x, y: box.y, button: 'left', clickCount: 1, buttons: type === 'mousePressed' ? 1 : 0,
-    });
-  }
-  await delay(120);
-}
+const browser = await launchChrome({ port: 9333 });
+const { cdp } = browser;
 
-async function screenshot(cdp, file) {
-  const shot = await cdp.send('Page.captureScreenshot', { format: 'png' });
-  fs.writeFileSync(file, Buffer.from(shot.data, 'base64'));
-  return file;
-}
-
-/* ------------------------------------------------------------------ *
- * Execucao
- * ------------------------------------------------------------------ */
-
-const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'musicgpt-cdp-'));
-const chrome = spawn(CHROME, [
-  '--headless=new',
-  `--remote-debugging-port=${CDP_PORT}`,
-  `--user-data-dir=${profile}`,
-  '--no-sandbox',
-  '--disable-dev-shm-usage',
-  '--disable-gpu',
-  '--autoplay-policy=no-user-gesture-required',
-  '--window-size=1280,860',
-  'about:blank',
-], { stdio: ['ignore', 'ignore', 'pipe'] });
-
-let chromeErr = '';
-chrome.stderr.on('data', (d) => { chromeErr += d.toString(); });
-
-async function waitForTarget() {
-  for (let i = 0; i < 60; i += 1) {
-    try {
-      const res = await fetch(`http://127.0.0.1:${CDP_PORT}/json/list`);
-      const list = await res.json();
-      const page = list.find((t) => t.type === 'page');
-      if (page?.webSocketDebuggerUrl) return page;
-    } catch { /* ainda subindo */ }
-    await delay(250);
-  }
-  throw new Error(`Chromium nao subiu na porta ${CDP_PORT}. ${chromeErr.slice(-400)}`);
-}
-
-let cdp;
 try {
-  const target = await waitForTarget();
-  cdp = await CDP.connect(target.webSocketDebuggerUrl);
-  await cdp.send('Page.enable');
-  await cdp.send('Runtime.enable');
-  await cdp.send('Log.enable');
-
-  console.log(`${C.y}abrindo ${APP_URL}${C.x}`);
+  console.log(`${report.colors.y}abrindo ${APP_URL}${report.colors.x}`);
   await cdp.send('Page.navigate', { url: APP_URL });
   await delay(2500);
 
@@ -348,17 +206,11 @@ try {
   const relevantes = cdp.errors.filter((e) => !/favicon|manifest|ServiceWorker|sw\.js/i.test(e));
   check('nenhum erro de JavaScript na pagina', relevantes.length === 0, relevantes.slice(0, 2).join(' | '));
 
-  console.log(`\n${C.d}screenshots: ${path.join(os.tmpdir(), 'musicgpt-espectro-desktop.png')} e ${path.join(os.tmpdir(), 'musicgpt-espectro-mobile.png')}${C.x}`);
+  console.log(`\n${report.colors.d}screenshots: ${path.join(os.tmpdir(), 'musicgpt-espectro-desktop.png')} e ${path.join(os.tmpdir(), 'musicgpt-espectro-mobile.png')}${report.colors.x}`);
 } catch (err) {
   check(`execucao do teste (${err.message})`, false);
-  if (chromeErr) console.error(chromeErr.slice(-800));
 } finally {
-  try { cdp?.ws.close(); } catch { /* ignora */ }
-  chrome.kill('SIGKILL');
-  await delay(400);
-  try { fs.rmSync(profile, { recursive: true, force: true, maxRetries: 5 }); } catch { /* ignora */ }
+  await browser.close();
 }
 
-const falhas = results.filter((r) => !r.ok);
-console.log(`\n${falhas.length ? C.r : C.g}${results.length - falhas.length}/${results.length} verificacoes ok${C.x}`);
-process.exit(falhas.length ? 1 : 0);
+process.exit(report.summary() ? 1 : 0);

@@ -94,6 +94,14 @@ export const ACESTEP = {
    * pouco mais que o alvo (fator 2,3). Ajuste em ACESTEP_DURATION_FACTOR.
    */
   durationFactor: Number(process.env.ACESTEP_DURATION_FACTOR || 2.3),
+  /**
+   * Guarda a `audio_url` original (a data URL com o audio em base64) nos
+   * metadados da faixa. No deploy na nuvem o disco e efemero e o arquivo
+   * some no proximo restart; com a URL original o download continua
+   * funcionando. 0 = nao guardar (biblioteca fica leve, mas o download
+   * passa a depender do arquivo local).
+   */
+  keepSourceAudio: process.env.MUSICGPT_KEEP_SOURCE_AUDIO !== '0',
 };
 
 /** Valores de exemplo: nao contam como chave configurada. */
