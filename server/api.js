@@ -17,7 +17,7 @@ import {
 } from './config.js';
 import { generateLyricsWithProvider } from './providers/lyrics.js';
 import { generateMusic } from './providers/music.js';
-import { aceStepStatus } from './providers/acestep.js';
+import { aceStepStatus, normalizeAudioMode } from './providers/acestep.js';
 import { generateLyrics as generateLocalLyrics } from './lyrics.js';
 import { voiceOver, resolveTtsVoice } from './audio/voice.js';
 import { detectGenre, detectMood, MAX_DURATION_SEC } from './audio/render.js';
@@ -331,7 +331,12 @@ async function executeJob(job, options, referenceAudio = null) {
       warnings,
       // audio de referencia usado como estilo (sem o audio em si)
       referenceAudio: result.meta?.referenceAudio
-        || (referenceAudio ? { ...referenceSummary(referenceAudio), used: false } : null),
+        || (referenceAudio ? { ...referenceSummary(referenceAudio), used: false, mode: options.audioMode } : null),
+      // modo usado com o audio anexado: "reference" (estilo/remix) ou
+      // "cover" (manter a melodia original). null = sem audio anexado.
+      audioMode: referenceAudio
+        ? (result.meta?.audioMode || options.audioMode)
+        : null,
       lofi: Boolean(options.lofi),
       engine: result.meta?.engine || effectiveProvider,
       provider: effectiveProvider,
@@ -344,7 +349,12 @@ async function executeJob(job, options, referenceAudio = null) {
       sourceFormat: result.sourceFormat || result.meta?.sourceFormat || format,
       peaks: result.peaks || [],
       // a primeira tag e o estilo usado (texto digitado quando existe)
-      tags: [options.styleLabel, options.moodLabel, options.lofi ? 'chuva' : null].filter(Boolean),
+      tags: [
+        options.styleLabel,
+        options.moodLabel,
+        options.lofi ? 'chuva' : null,
+        referenceAudio ? (options.audioMode === 'cover' ? 'modo: cover' : 'modo: estilo') : null,
+      ].filter(Boolean),
       createdAt: now,
       plays: 0,
       likes: 0,
@@ -435,6 +445,18 @@ export const handlers = {
     }
 
     /**
+     * MODO DO AUDIO ANEXADO.
+     *
+     * - `reference` (padrao): o arquivo e so uma REFERENCIA DE ESTILO - a
+     *   API cria uma musica nova usando o timbre/producao dele.
+     * - `cover`: o arquivo e o AUDIO DE ORIGEM (`src_audio`): o modelo tenta
+     *   manter a melodia e a estrutura originais.
+     *
+     * Sem audio anexado o modo nao muda nada (pedido em texto puro).
+     */
+    const audioMode = normalizeAudioMode(body.audioMode);
+
+    /**
      * PRIORIDADE ABSOLUTA DO TEXTO DO CAMPO "ESTILOS".
      *
      * Quando o cliente envia o texto digitado (`style`), ele manda: o genero
@@ -466,6 +488,8 @@ export const handlers = {
       styleLabel: effectiveStyle,
       styleSource: styleFromText ? 'text' : 'genre',
       styleFromText,
+      // modo do audio anexado: referencia de estilo (remix) ou cover
+      audioMode,
       instrumental: asBool(body.instrumental),
       duration: Math.min(MAX_DURATION_SEC, Math.max(20, Number(body.duration) || 75)),
       voiceStyle: VOICE_STYLES[body.voiceStyle] ? body.voiceStyle : genre.vocal,

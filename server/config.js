@@ -109,6 +109,14 @@ export const ACESTEP = {
    * de estilo pura (a musica nova segue a referencia sem ser copia dela).
    */
   referenceStrength: Number(process.env.ACESTEP_REFERENCE_STRENGTH || 0.3),
+  /**
+   * Peso do audio de origem no modo COVER (`task_type: "cover"`): o modelo
+   * tenta manter a melodia e a estrutura do arquivo original. A
+   * documentacao do ACE-Step usa 1.0 para um cover colado no original e
+   * ~0.2 so para referencia de estilo; 0.85 mantem a melodia bem proxima
+   * sem ser uma copia identica.
+   */
+  coverStrength: Number(process.env.ACESTEP_COVER_STRENGTH || 0.85),
 };
 
 /** Valores de exemplo: nao contam como chave configurada. */

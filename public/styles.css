@@ -481,6 +481,29 @@ code { background: #0e0e15; border: 1px solid var(--line); border-radius: 5px; p
 .ref-audio-size { flex: none; color: var(--muted); font-size: 11.5px; white-space: nowrap; }
 .ref-audio .icon-btn { width: 26px; height: 26px; flex: none; border-radius: 8px; }
 
+/* seletor de modo do audio anexado: estilo (remix) x cover (melodia) */
+.ref-audio { flex-wrap: wrap; }
+.audio-modes {
+  flex: 1 0 100%;
+  display: flex; flex-direction: column; gap: 4px;
+  margin-top: 2px; padding-top: 8px;
+  border-top: 1px solid rgba(124, 92, 255, .25);
+}
+.audio-mode {
+  display: flex; align-items: flex-start; gap: 8px;
+  padding: 6px 8px; border-radius: 9px; cursor: pointer;
+  border: 1px solid transparent; transition: .14s ease;
+}
+.audio-mode:hover { background: rgba(124, 92, 255, .10); }
+.audio-mode input { flex: none; margin: 2px 0 0; accent-color: var(--brand); }
+.audio-mode.is-on {
+  background: rgba(124, 92, 255, .16);
+  border-color: rgba(124, 92, 255, .5);
+}
+.audio-mode-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.audio-mode-text b { font-size: 12.5px; font-weight: 600; color: var(--text); }
+.audio-mode-text small { font-size: 11px; color: var(--muted); line-height: 1.35; }
+
 .block {
   border: 1px solid var(--line);
   border-radius: var(--radius-sm);

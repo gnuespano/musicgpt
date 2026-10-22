@@ -32,6 +32,21 @@
  *   task_type: "text2music"
  *   audio_cover_strength: 0.3      (0.2 = transferencia de estilo pura)
  *
+ * MODO COVER (manter a melodia original):
+ * o mesmo bloco `input_audio` e enviado, mas com `task_type: "cover"`. E o
+ * `task_type` que decide para onde a API encaminha o audio enviado
+ * (documentacao do ACE-Step, "Audio Routing Rules"):
+ *
+ *   task_type            audio[0]                      audio[1]
+ *   text2music           reference_audio (estilo)       -
+ *   cover/repaint/...    src_audio (audio a ser coberto) reference_audio (opcional)
+ *
+ * Entao, no cover, o arquivo anexado entra como `src_audio` (a melodia e a
+ * estrutura originais) e `audio_cover_strength` sobe para 0.85 (melodia bem
+ * proxima do original). Sem o bloco `input_audio` a API responde 400
+ * ("Task 'cover' requires source audio") - por isso o audio continua
+ * indo no bloco multimodal, e nao em um campo solto no corpo.
+ *
  * Sem audio de referencia o pedido e EXATAMENTE o de antes (texto puro).
  *
  * Sem ACESTEP_API_KEY no .env este arquivo nunca e chamado: o app usa o
@@ -54,6 +69,23 @@ const MODEL_FALLBACKS = [
 
 const MIN_DURATION = 10;
 const MAX_DURATION = 240;
+
+/**
+ * Modos do audio anexado.
+ *
+ * - `reference`: o arquivo e so uma REFERENCIA DE ESTILO (remix): a API usa
+ *   o timbre/producao dele e cria uma musica nova.
+ * - `cover`:     o arquivo e o AUDIO DE ORIGEM (src_audio): o modelo tenta
+ *   manter a melodia e a estrutura originais.
+ */
+export const AUDIO_MODES = { REFERENCE: 'reference', COVER: 'cover' };
+
+/** Normaliza o modo pedido (qualquer coisa fora de "cover" = referencia). */
+export function normalizeAudioMode(mode) {
+  return String(mode || '').trim().toLowerCase() === AUDIO_MODES.COVER
+    ? AUDIO_MODES.COVER
+    : AUDIO_MODES.REFERENCE;
+}
 
 /* ------------------------------------------------------------------ *
  * Montagem do pedido
@@ -140,8 +172,14 @@ export function buildRequestBody({ prompt, lyrics, style, styleFromText = false,
   const vocalLanguage = ACESTEP.vocalLanguage || (options.lang === 'en' ? 'en' : 'pt');
   if (vocalLanguage) audioConfig.vocal_language = vocalLanguage;
 
-  // audio de referencia (style transfer): bloco multimodal input_audio
+  // audio de referencia (style transfer) OU audio de origem (cover):
+  // bloco multimodal input_audio. Quem decide o destino do arquivo e o
+  // `task_type` (veja o cabecalho deste arquivo):
+  //   text2music -> reference_audio (o arquivo e so referencia de estilo)
+  //   cover      -> src_audio      (o arquivo e a melodia a ser mantida)
   const reference = options.referenceAudio || null;
+  const audioMode = normalizeAudioMode(options.audioMode);
+  const isCover = reference && audioMode === AUDIO_MODES.COVER;
 
   const textContent = cleanLyrics
     ? `<prompt>${caption}</prompt><lyrics>${cleanLyrics}</lyrics>`
@@ -166,8 +204,10 @@ export function buildRequestBody({ prompt, lyrics, style, styleFromText = false,
       content,
     }],
     stream: false,
-    // 5Hz LM: gera os codigos semanticos antes do DiT (qualidade mais alta)
-    thinking: ACESTEP.thinking,
+    // 5Hz LM: gera os codigos semanticos antes do DiT (qualidade mais alta).
+    // No cover o LM e pulado pela propria API (nao ajuda em tarefa de
+    // audio a editar), entao nao gastamos tempo com ele.
+    thinking: isCover ? false : ACESTEP.thinking,
     // a letra ja vem pronta: nao deixamos o modelo reescrever
     use_format: false,
     use_cot_caption: true,
@@ -175,13 +215,21 @@ export function buildRequestBody({ prompt, lyrics, style, styleFromText = false,
     audio_config: audioConfig,
   };
 
-  // sem letra do usuario: o proprio LM escreve a letra (sample mode)
-  if (!cleanLyrics && !instrumental) body.sample_mode = true;
+  // sem letra do usuario: o proprio LM escreve a letra (sample mode).
+  // No cover nao: a melodia vem do audio de origem e uma letra nova
+  // inventada pelo LM brigaria com a estrutura original.
+  if (!cleanLyrics && !instrumental && !isCover) body.sample_mode = true;
 
   if (reference) {
-    // o audio anexado vira a referencia de estilo (task_type text2music)
-    body.task_type = 'text2music';
-    body.audio_cover_strength = ACESTEP.referenceStrength;
+    if (isCover) {
+      // COVER: o audio anexado e o `src_audio` (melodia/estrutura original)
+      body.task_type = 'cover';
+      body.audio_cover_strength = ACESTEP.coverStrength;
+    } else {
+      // REFERENCIA DE ESTILO: o audio anexado vira `reference_audio`
+      body.task_type = 'text2music';
+      body.audio_cover_strength = ACESTEP.referenceStrength;
+    }
   }
 
   if (ACESTEP.model) body.model = ACESTEP.model;
@@ -409,7 +457,8 @@ async function computeAudioPeaks(buffer, format) {
  * @param {string} lyrics  letra (vazio = o modelo escreve a letra)
  * @param {string} style   estilo efetivo (texto digitado ou genero do botao)
  * @param {object} options { duration, instrumental, genreLabel, moodLabel, lofi,
- *                           trackId, onProgress, referenceAudio, styleFromText }
+ *                           trackId, onProgress, referenceAudio, styleFromText,
+ *                           audioMode }
  * @returns {Promise<{buffer: Buffer, format: string, duration: number|null,
  *                    file: string, path: string, meta: object}>}
  */
@@ -422,13 +471,17 @@ export async function generateAceMusic(prompt, lyrics, style, options = {}) {
   const reference = options.referenceAudio || null;
   // o texto digitado pelo usuario tem prioridade sobre o genero do botao
   const styleFromText = Boolean(options.styleFromText);
+  // modo do audio anexado: referencia de estilo (remix) ou cover (melodia)
+  const audioMode = normalizeAudioMode(options.audioMode);
   const body = buildRequestBody({ prompt, lyrics, style, styleFromText, options });
 
   onProgress({
     stage: 'enviando ao ACE-Step',
     pct: 20,
     detail: reference
-      ? `estilo a partir do audio (${reference.format})`
+      ? (audioMode === AUDIO_MODES.COVER
+        ? `cover do audio (${reference.format})`
+        : `estilo a partir do audio (${reference.format})`)
       : (body.sample_mode ? 'o modelo escreve a letra' : 'letra + estilo'),
   });
 
@@ -505,7 +558,12 @@ export async function generateAceMusic(prompt, lyrics, style, options = {}) {
   // `used: false` significa que a API recusou o arquivo e a faixa foi gerada
   // sem ele (fallback dentro do provider).
   meta.referenceAudio = reference
-    ? { ...referenceSummary(reference), used: usedReference }
+    ? { ...referenceSummary(reference), used: usedReference, mode: audioMode }
+    : null;
+  // modo usado com o audio anexado (cover = manter a melodia original)
+  meta.audioMode = reference ? audioMode : null;
+  meta.coverStrength = reference && audioMode === AUDIO_MODES.COVER
+    ? ACESTEP.coverStrength
     : null;
 
   // salva o MP3 no servidor e devolve o caminho local para o player
@@ -544,5 +602,8 @@ export function aceStepStatus() {
     // audio de referencia (Audio-to-Audio / Style Transfer) via input_audio
     referenceAudio: true,
     referenceStrength: ACESTEP.referenceStrength,
+    // cover (manter a melodia original) via task_type: "cover"
+    cover: true,
+    coverStrength: ACESTEP.coverStrength,
   };
 }

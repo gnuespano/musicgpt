@@ -22,6 +22,8 @@ const state = {
   ttsVoice: '',
   singStrength: 0.85,
   referenceAudioFile: null,
+  // modo do audio anexado: 'reference' (estilo/remix) ou 'cover' (melodia)
+  audioMode: 'reference',
   volume: 0.9,
   muted: false,
 };
@@ -146,13 +148,29 @@ function bindCreateBlocks() {
 }
 
 /* ------------------------------------------------------------------ *
- * Áudio de referência (Audio-to-Audio / Style Transfer)
+ * Áudio de referência (Audio-to-Audio / Style Transfer) e Cover
  * ------------------------------------------------------------------ */
 
 /** Limite do upload (mesmo do servidor: 15 MB). */
 const MAX_REFERENCE_BYTES = 15 * 1024 * 1024;
 
 const AUDIO_EXT_RE = /\.(mp3|wav|wave|ogg|oga|opus|m4a|mp4|aac|flac|webm|aiff|aif)$/i;
+
+/**
+ * Modos do audio anexado.
+ *
+ * - `reference`: o arquivo e so uma referencia de estilo (remix) - a musica
+ *   nova nasce com o timbre/producao dele.
+ * - `cover`: o arquivo e o audio de origem - o modelo tenta manter a
+ *   melodia e a estrutura originais.
+ */
+const AUDIO_MODES = { REFERENCE: 'reference', COVER: 'cover' };
+
+/** Rotulo curto do modo (tag no card da faixa). */
+const AUDIO_MODE_LABEL = {
+  [AUDIO_MODES.REFERENCE]: 'modo: estilo',
+  [AUDIO_MODES.COVER]: 'modo: cover',
+};
 
 function formatBytes(bytes) {
   const n = Number(bytes);
@@ -164,7 +182,7 @@ function formatBytes(bytes) {
 
 /**
  * Guarda o audio de referencia escolhido pelo usuario e reflecte o estado
- * na tela (nome do arquivo + botao marcado).
+ * na tela (nome do arquivo + botao marcado + modo selecionado).
  */
 function setReferenceAudio(file) {
   state.referenceAudioFile = file || null;
@@ -179,7 +197,37 @@ function setReferenceAudio(file) {
   } else {
     if (box) box.hidden = true;
     btn?.classList.remove('is-on');
-    if (btn) btn.title = 'Anexar áudio de referência (o estilo e o timbre seguem o arquivo)';
+    if (btn) btn.title = 'Anexar áudio: referência de estilo (remix) ou cover (manter a melodia)';
+  }
+  syncAudioMode();
+}
+
+/**
+ * Le o modo escolhido no seletor (estilo x cover) e guarda no estado.
+ * O modo so muda o que a API faz com o arquivo: `reference` usa ele como
+ * referencia de estilo, `cover` usa ele como audio de origem (src_audio).
+ */
+function setAudioMode(mode) {
+  const value = mode === AUDIO_MODES.COVER ? AUDIO_MODES.COVER : AUDIO_MODES.REFERENCE;
+  state.audioMode = value;
+  syncAudioMode();
+  return value;
+}
+
+/** Reflete o modo atual nos botoes de radio e no texto de ajuda. */
+function syncAudioMode() {
+  const modo = state.audioMode || AUDIO_MODES.REFERENCE;
+  $$('input[name="audioMode"]').forEach((input) => {
+    input.checked = input.value === modo;
+    input.closest('.audio-mode')?.classList.toggle('is-on', input.checked);
+  });
+  const box = $('#refAudioBox');
+  if (box) box.dataset.mode = modo;
+  const btn = $('#btnAddAudio');
+  if (btn && state.referenceAudioFile) {
+    btn.title = modo === AUDIO_MODES.COVER
+      ? `Cover: manter a melodia de ${state.referenceAudioFile.name}`
+      : `Áudio de referência (estilo): ${state.referenceAudioFile.name}`;
   }
 }
 
@@ -354,6 +402,8 @@ async function generate() {
       ttsVoice: state.ttsVoice || '',
       singStrength: state.singStrength ?? 0.85,
       lyrics: $('#customLyrics').value.trim(),
+      // modo do audio anexado: 'reference' (estilo/remix) ou 'cover'
+      audioMode: state.audioMode || AUDIO_MODES.REFERENCE,
     };
 
     const reference = state.referenceAudioFile;
@@ -415,6 +465,7 @@ function watchJob(jobId, btn) {
           ${track.key ? `<span class="tag">${escapeHtml(track.key)}</span>` : ''}
           ${track.lofi ? '<span class="tag">chuva</span>' : ''}
           ${track.referenceAudio?.used ? `<span class="tag">ref: ${escapeHtml(track.referenceAudio.name)}</span>` : ''}
+          ${track.audioMode ? `<span class="tag">${escapeHtml(AUDIO_MODE_LABEL[track.audioMode] || `modo: ${track.audioMode}`)}</span>` : ''}
           ${track.engine ? `<span class="tag">${escapeHtml(track.engine || '')}</span>` : ''}
           ${track.voiceInfo?.engine === 'openrouter' ? '<span class="tag">voz IA</span>' : ''}
           ${track.voiceInfo?.engine === 'acestep' ? '<span class="tag">voz ACE-Step</span>' : ''}
@@ -586,6 +637,7 @@ function trackCard(t) {
       ${t.bpm ? `<span>${t.bpm} BPM</span>` : ''}
       ${t.key ? `<span>${escapeHtml(t.key)}</span>` : ''}
       ${t.instrumental ? '<span>instrumental</span>' : '<span>com voz</span>'}
+      ${t.audioMode ? `<span>${escapeHtml(AUDIO_MODE_LABEL[t.audioMode] || `modo: ${t.audioMode}`)}</span>` : ''}
       ${t.voiceInfo?.engine === 'openrouter' ? '<span>voz IA</span>' : ''}
       ${t.voiceInfo?.engine === 'acestep' ? '<span>voz ACE-Step</span>' : ''}
       ${t.lofi ? '<span>chuva</span>' : ''}
@@ -1334,6 +1386,16 @@ function bind() {
   $('#referenceAudioInput').addEventListener('change', (ev) => {
     acceptReferenceAudio(ev.target.files?.[0] || null);
   });
+  // modo do audio anexado: referencia de estilo (remix) x cover (melodia)
+  $$('input[name="audioMode"]').forEach((input) => {
+    input.addEventListener('change', (ev) => {
+      if (!ev.target.checked) return;
+      const modo = setAudioMode(ev.target.value);
+      toast(modo === AUDIO_MODES.COVER
+        ? 'Cover: a melodia do áudio original será mantida.'
+        : 'Estilo (remix): o áudio entra só como referência de estilo.', 'ok');
+    });
+  });
   $('#btnRemoveRefAudio').addEventListener('click', () => {
     clearReferenceAudio();
     toast('Áudio de referência removido.', 'info');
@@ -1729,6 +1791,7 @@ async function boot() {
   await loadTracks();
   await loadPlaylists();
   syncStylePriority();
+  syncAudioMode();
   try {
     const res = await api('/api/profile');
     state.profile = res.profile;

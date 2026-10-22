@@ -24,6 +24,7 @@ Sem build step, sem framework, sem bundler. Uma dependência (`@breezystack/lame
 | 6 | **Biblioteca musical com IA** | Biblioteca persistente com waveform, BPM, tom, estrutura, plays; aba **Explorar** com ideias da comunidade e faixas publicadas. |
 | 7 | **Exportar e compartilhar** | Botão **"Baixar .wav"** e **"Baixar .mp3"** no painel de resultado, no card da faixa e no player; compartilhamento via Web Share API ou link copiado. O download resolve a **URL original do provider**, então funciona mesmo com o disco efêmero da nuvem (ver 5.2). |
 | 8 | **Áudio de referência (Audio-to-Audio / Style Transfer)** | Botão **"Áudio ref."** na tela *Criar*: anexe um arquivo de áudio e a música nova nasce **com o timbre/instrumentação do arquivo** (`server/upload.js` + `server/audio/reference.js` + `server/providers/acestep.js`). Ver 4.0.1. |
+| 9 | **Cover (manter a melodia)** | O mesmo áudio pode ser usado como **áudio de origem** (`src_audio`, `task_type: "cover"`): o modelo tenta manter a melodia e a estrutura originais. Ver 4.0.2. |
 
 ### Duração e camadas extras
 
@@ -137,6 +138,7 @@ musicgpt/
 │   ├── provar-acestep.mjs      # sonda: o que a API do ACE-Step devolve
 │   ├── testar-audio-referencia.mjs  # teste do upload do áudio de referência
 │   ├── testar-estilo-prioridade.mjs # teste da prioridade do texto de Estilos
+│   ├── testar-modo-audio.mjs     # teste do modo do áudio (estilo x cover)
 │   ├── testar-espectro.mjs     # teste do visualizador (Chromium headless + CDP)
 │   └── testar-download.mjs     # teste do download (disco efemero, MP3/WAV)
 └── data/                   # library.json, playlists.json, profile.json, tracks/
@@ -183,7 +185,7 @@ Cada faixa guarda os metadados: BPM, tom, estrutura, progressão, vozes cantadas
 
 - **Variedade** (0–100) altera o arranjo no motor: densidade do arpejo, repetição da melodia, inversões de acorde e fills de bateria. 0 = parado e repetitivo, 100 = mais disperso (medido: 33% de diferença na forma de onda entre os extremos).
 - **+ Voz** abre o seletor: **Automático** (IA se houver chave), **Voz por IA (OpenRouter)** ou **Voz procedural (local)**, com 10 vozes (alloy, coral, onyx, ash, echo, fable, shimmer, nova, sage, verse).
-- **Áudio ref.** anexa um arquivo de áudio para a geração seguir o estilo/timbre dele (ver 4.0.1). O nome do arquivo aparece logo abaixo do campo de ideia, com botão para remover.
+- **Áudio ref.** anexa um arquivo de áudio para a geração seguir o estilo/timbre dele (ver 4.0.1). O nome do arquivo aparece logo abaixo do campo de ideia, com botão para remover e o **seletor de modo**: *Estilo (Remix)* ou *Cover (Manter Melodia)* (ver 4.0.2).
 - **Prioridade do estilo**: o **texto do campo "Estilos" manda sempre**. Quando ele está preenchido, os botões de gênero (Pop, MPB, …) são **ignorados** — ficam esmaecidos, não aceitam clique e o app avisa ("O texto digitado tem prioridade"). Só quando o texto está **vazio** o botão selecionado entra como fallback. A regra é garantida nos dois lados: o front-end manda `style` (o texto) e `genre` vazio, e o servidor ignora o gênero quando recebe o texto (`styleSource: "text"`).
 
 ---
@@ -270,6 +272,7 @@ Ajuste o fator em `ACESTEP_DURATION_FACTOR` (1 = sem compensação). A duração
 | `ACESTEP_VOCAL_LANGUAGE` | vazio (usa o idioma do app) | Idioma do vocal (`en`, `pt`, `zh`, `ja`…). |
 | `ACESTEP_DURATION_FACTOR` | `2.3` | Compensação da duração (ver acima). |
 | `ACESTEP_REFERENCE_STRENGTH` | `0.3` | Peso do áudio de referência na geração (ver 4.0.1). |
+| `ACESTEP_COVER_STRENGTH` | `0.85` | Peso do áudio de origem no modo **cover** — quanto maior, mais perto da melodia original (ver 4.0.2). |
 | `ACESTEP_TIMEOUT_MS` | `600000` | Timeout da geração. |
 | `MUSICGPT_MAX_REFERENCE_BYTES` | `15728640` (15 MB) | Tamanho máximo do áudio de referência enviado pelo app. |
 
@@ -291,7 +294,8 @@ Anexe um arquivo de áudio e a música nova nasce **com o estilo do arquivo**: m
 
 1. O botão **"Áudio ref."** (no topo do painel, ao lado de "Voz") abre o seletor de arquivos (`<input type="file" accept="audio/*">` escondido).
 2. Escolhido o arquivo, o **nome e o tamanho** aparecem numa faixa roxa logo abaixo do campo de ideia, com um botão **✕** para remover.
-3. Ao tocar em **Criar**, o app envia o pedido em `multipart/form-data` (o arquivo no campo `referenceAudio`); sem arquivo, continua enviando JSON — o fluxo "gerar do zero" **não muda**.
+3. Na mesma faixa aparece o **seletor de modo** (ver 4.0.2): *Estilo (Remix)* ou *Cover (Manter Melodia)*.
+4. Ao tocar em **Criar**, o app envia o pedido em `multipart/form-data` (o arquivo no campo `referenceAudio` + o campo `audioMode`); sem arquivo, continua enviando JSON — o fluxo "gerar do zero" **não muda**.
 
 **No servidor**
 
@@ -338,7 +342,62 @@ npm run test:referencia              # sobe o próprio servidor (motor local) e 
 MUSICGPT_TESTE_LIVE=1 npm run test:referencia   # gera de verdade no ACE-Step com áudio de referência
 ```
 
-### 4.0.2 Prioridade do texto de Estilos sobre os botões de gênero
+### 4.0.2 Estilo (Remix) x Cover (Manter Melodia)
+
+O mesmo áudio anexado pode ser usado de **duas maneiras**, escolhidas no seletor que aparece na faixa do arquivo:
+
+| Modo | O que o arquivo é | Efeito |
+|---|---|---|
+| **Estilo (Remix)** (padrão) | `reference_audio` — só referência de estilo/timbre | A música nova é outra: mesmo timbre/instrumentação/produção, melodia e letra novas. (`task_type: "text2music"`, `audio_cover_strength: 0.3`) |
+| **Cover (Manter Melodia)** | `src_audio` — o **áudio de origem** | O modelo tenta manter a melodia e a estrutura do original, trocando o resto pelo prompt. (`task_type: "cover"`, `audio_cover_strength: 0.85`) |
+
+**Na interface**
+
+1. Anexe o arquivo (botão **"Áudio ref."**) — a faixa roxa mostra nome, tamanho e o seletor de modo.
+2. Escolha o modo (radio buttons): *Estilo (Remix)* ou *Cover (Manter Melodia)*.
+3. O modo vai no pedido (`audioMode`) e aparece no card da faixa gerada: tag **`modo: estilo`** ou **`modo: cover`**.
+
+**Como o arquivo chega na API**
+
+O arquivo vai no bloco multimodal `input_audio` da mensagem. **Quem decide para onde ele é encaminhado é o `task_type`** (documentação do ACE-Step, *Audio Routing Rules*):
+
+| `task_type` | `audio[0]` | `audio[1]` |
+|---|---|---|
+| `text2music` | `reference_audio` (referência de estilo) | — |
+| `cover` / `repaint` / `lego` / `extract` / `complete` | **`src_audio`** (áudio a ser editado) | `reference_audio` (opcional) |
+
+No modo cover o pedido sai assim:
+
+```json
+{
+  "messages": [{
+    "role": "user",
+    "content": [
+      { "type": "text", "text": "<prompt>rock anos 90 com guitarra pesada</prompt>" },
+      { "type": "input_audio", "input_audio": { "data": "<base64 do arquivo>", "format": "wav" } }
+    ]
+  }],
+  "task_type": "cover",
+  "audio_cover_strength": 0.85,
+  "thinking": false,
+  "audio_config": { "format": "mp3", "instrumental": false, "duration": 69 }
+}
+```
+
+> O bloco `input_audio` é obrigatório no cover: sem ele a API responde `400` ("Task 'cover' requires source audio"). É por isso que o arquivo **não** vai num campo solto (`src_audio`) no corpo JSON — o endpoint compatível com OpenAI ignora esse campo e exige o bloco multimodal (verificado contra a API hospedada).
+
+Duas diferenças do cover no provider (`server/providers/acestep.js`): o **LM 5Hz é desligado** (`thinking: false`, porque a API pula o LM em tarefas de edição) e o **sample mode é desativado** (a letra nova não é inventada pelo LM — brigaria com a melodia original).
+
+**Teste**
+
+```bash
+npm run test:modo                    # contrato + HTTP + navegador (Chromium headless, motor local)
+MUSICGPT_TESTE_LIVE=1 npm run test:modo   # gera de verdade no ACE-Step no modo cover
+```
+
+O teste confere o `task_type`/`audio_cover_strength` de cada modo, a rota HTTP (`audioMode` + tag), o seletor na interface, o card com a tag do modo e o **layout mobile** (sem overflow, seletor visível e clicável).
+
+### 4.0.3 Prioridade do texto de Estilos sobre os botões de gênero
 
 O **texto** do bloco "Estilos" tem prioridade **absoluta** sobre os botões de gênero (Pop, MPB, …).
 
@@ -466,7 +525,7 @@ cd musicgpt
 npm install          # só o encoder de MP3
 npm start            # porta 8787 (PORT=xxxx para trocar)
 npm run dev          # com --watch
-npm test             # testes locais (referência + estilo + espectro + download) - servidor precisa estar no ar
+npm test             # testes locais (referência + estilo + modo do áudio + espectro + download) - servidor precisa estar no ar
 ```
 
 Variáveis úteis: `PORT`, `HOST`, `MUSICGPT_DATA_DIR`, `MUSICGPT_MUSIC_PROVIDER`, `MUSICGPT_LYRICS_PROVIDER`, `MUSICGPT_TTS_PROVIDER`, `ACESTEP_API_KEY`, `ACESTEP_BASE_URL`, `ACESTEP_MODEL`, `ACESTEP_THINKING`, `ACESTEP_VOCAL_LANGUAGE`, `ACESTEP_DURATION_FACTOR`, `ACESTEP_REFERENCE_STRENGTH`, `ACESTEP_TIMEOUT_MS`, `MUSICGPT_MAX_REFERENCE_BYTES`, `REPLICATE_API_TOKEN`, `FAL_KEY`, `OPENAI_API_KEY`, `OPENROUTER_API_KEY`, `MUSICGPT_SSL_CERT`, `MUSICGPT_SSL_KEY`.
@@ -564,3 +623,4 @@ Verificado no Chromium: SW `activated` com escopo `/`, 10 itens no precache, `co
 - Faixas em **WAV** ocupam ~10 MB/min no disco; o MP3 (~1,2 MB/min) é gerado sob demanda.
 - Durações curtas (abaixo de ~25 s) ficam limitadas pela estrutura mínima (20 compassos), então o resultado é sempre um pouco mais longo que o pedido.
 - O **áudio de referência** só tem efeito com o motor **ACE-Step** (é ele que sabe usar a referência de estilo). O motor procedural local ignora o arquivo e avisa no card da faixa. O arquivo não é cortado nem processado: vai inteiro em base64 no pedido (limite de 15 MB).
+- O modo **cover** depende do ACE-Step também: sem ele o arquivo é ignorado e a faixa nasce do prompt (o card mostra o aviso). No cover a duração final acompanha a do **áudio de origem** (a API mantém a melodia e o comprimento do original) — o slider de duração vale para o estilo/remix.
