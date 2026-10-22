@@ -139,6 +139,7 @@ musicgpt/
 │   ├── testar-audio-referencia.mjs  # teste do upload do áudio de referência
 │   ├── testar-estilo-prioridade.mjs # teste da prioridade do texto de Estilos
 │   ├── testar-modo-audio.mjs     # teste do modo do áudio (estilo x cover)
+│   ├── testar-fidelidade.mjs     # mede a fidelidade de um cover (croma/melodia)
 │   ├── testar-espectro.mjs     # teste do visualizador (Chromium headless + CDP)
 │   └── testar-download.mjs     # teste do download (disco efemero, MP3/WAV)
 └── data/                   # library.json, playlists.json, profile.json, tracks/
@@ -170,10 +171,11 @@ Cada faixa guarda os metadados: BPM, tom, estrutura, progressão, vozes cantadas
 
 ```
 [ Áudio ref. ]   [ + Voz ]
-┌ Letra            ✨ ┐   varinha = gera a letra com IA
-│  textarea                toggle "Instrumental" dentro do bloco
+┌ Letra        ✨ [✦] ┐   varinha = sorteia um tema aleatório
+│  textarea           │   [✦] IA = gera a letra com IA
+│  toggle "Instrumental" dentro do bloco
 └─────────────────────────┘
-┌ Estilos          ✨ ┐   varinha = sugere uma descrição de estilo
+┌ Estilos          ✨ ┐   varinha = sorteia uma descrição de estilo aleatória
 │  textarea + faixa do áudio de referência + chips de gênero + clima + voz
 └─────────────────────────┘
 ┌ Mais opções          ┐
@@ -184,6 +186,7 @@ Cada faixa guarda os metadados: BPM, tom, estrutura, progressão, vozes cantadas
 ```
 
 - **Variedade** (0–100) altera o arranjo no motor: densidade do arpejo, repetição da melodia, inversões de acorde e fills de bateria. 0 = parado e repetitivo, 100 = mais disperso (medido: 33% de diferença na forma de onda entre os extremos).
+- **Varinha mágica** (✨): nos blocos **Estilos** e **Letra** ela **sorteia** um item de uma lista local — 22 descrições de estilo ("Lo-fi chill com piano suave, chuva de fundo e textura de vinil") e 22 temas de letra ("Uma música sobre dirigir na estrada à noite"). O campo acende com um brilho (`is-magic`) e dois cliques seguidos nunca repetem a mesma sugestão. O sorteio é offline: nada vai para a API (ver 4.0.4).
 - **+ Voz** abre o seletor: **Automático** (IA se houver chave), **Voz por IA (OpenRouter)** ou **Voz procedural (local)**, com 10 vozes (alloy, coral, onyx, ash, echo, fable, shimmer, nova, sage, verse).
 - **Áudio ref.** anexa um arquivo de áudio para a geração seguir o estilo/timbre dele (ver 4.0.1). O nome do arquivo aparece logo abaixo do campo de ideia, com botão para remover e o **seletor de modo**: *Estilo (Remix)* ou *Cover (Manter Melodia)* (ver 4.0.2).
 - **Prioridade do estilo**: o **texto do campo "Estilos" manda sempre**. Quando ele está preenchido, os botões de gênero (Pop, MPB, …) são **ignorados** — ficam esmaecidos, não aceitam clique e o app avisa ("O texto digitado tem prioridade"). Só quando o texto está **vazio** o botão selecionado entra como fallback. A regra é garantida nos dois lados: o front-end manda `style` (o texto) e `genre` vazio, e o servidor ignora o gênero quando recebe o texto (`styleSource: "text"`).
@@ -272,7 +275,8 @@ Ajuste o fator em `ACESTEP_DURATION_FACTOR` (1 = sem compensação). A duração
 | `ACESTEP_VOCAL_LANGUAGE` | vazio (usa o idioma do app) | Idioma do vocal (`en`, `pt`, `zh`, `ja`…). |
 | `ACESTEP_DURATION_FACTOR` | `2.3` | Compensação da duração (ver acima). |
 | `ACESTEP_REFERENCE_STRENGTH` | `0.3` | Peso do áudio de referência na geração (ver 4.0.1). |
-| `ACESTEP_COVER_STRENGTH` | `0.85` | Peso do áudio de origem no modo **cover** — quanto maior, mais perto da melodia original (ver 4.0.2). |
+| `ACESTEP_COVER_STRENGTH` | `0.98` | Peso do áudio de origem no modo **cover** — quanto maior, mais perto da melodia original (ver 4.0.2). |
+| `ACESTEP_COVER_NOISE_STRENGTH` | `0.7` | Âncora no áudio original no cover (`0` = ruído puro, `1` = colado no original). É o parâmetro que mais pesa na fidelidade. |
 | `ACESTEP_TIMEOUT_MS` | `600000` | Timeout da geração. |
 | `MUSICGPT_MAX_REFERENCE_BYTES` | `15728640` (15 MB) | Tamanho máximo do áudio de referência enviado pelo app. |
 
@@ -349,7 +353,30 @@ O mesmo áudio anexado pode ser usado de **duas maneiras**, escolhidas no seleto
 | Modo | O que o arquivo é | Efeito |
 |---|---|---|
 | **Estilo (Remix)** (padrão) | `reference_audio` — só referência de estilo/timbre | A música nova é outra: mesmo timbre/instrumentação/produção, melodia e letra novas. (`task_type: "text2music"`, `audio_cover_strength: 0.3`) |
-| **Cover (Manter Melodia)** | `src_audio` — o **áudio de origem** | O modelo tenta manter a melodia e a estrutura do original, trocando o resto pelo prompt. (`task_type: "cover"`, `audio_cover_strength: 0.85`) |
+| **Cover (Manter Melodia)** | `src_audio` — o **áudio de origem** | O modelo tenta manter a melodia e a estrutura do original, trocando o resto pelo prompt. (`task_type: "cover"`, `audio_cover_strength: 0.98`, `cover_noise_strength: 0.7`) |
+
+**Fidelidade ao Original** (slider, só no modo cover)
+
+O cover não é uma cópia: o ACE-Step **re-sintetiza** a faixa a partir do áudio de origem. O quanto ela gruda no original depende de dois parâmetros:
+
+| Parâmetro | O que faz | Padrão |
+|---|---|---|
+| `audio_cover_strength` | força da referência de melodia/códigos (`0.8`–`1.0` no slider) | `0.98` |
+| `cover_noise_strength` | âncora no áudio original (`0` = ruído puro, `1` = colado no original) | `0.7` |
+
+O slider **"Fidelidade ao Original"** (80%–100%) aparece só no modo cover e controla o `audio_cover_strength`. O `cover_noise_strength` fica no servidor (`ACESTEP_COVER_NOISE_STRENGTH`).
+
+> **Medido** no áudio "Modern Talking" (30 s, mesma seed e mesmo prompt em todas as variações, `npm run test:fidelidade`):
+>
+> | Cover | melodia | nota dominante igual |
+> |---|---|---|
+> | faixa **sem relação** com o original (controle) | 0.58–0.74 | 0.08–0.35 |
+> | `audio_cover_strength: 0.85` sem `cover_noise_strength` (config antiga) | 0.71 | 0.27 |
+> | `audio_cover_strength: 0.98` **sem** `cover_noise_strength` | 0.73 | 0.30 |
+> | `audio_cover_strength: 0.85` + `cover_noise_strength: 0.7` | 0.77 | 0.38 |
+> | `audio_cover_strength: 1.00` + `cover_noise_strength: 0.7` (padrão novo) | 0.77 | 0.38–0.39 |
+>
+> Ou seja: o `cover_noise_strength` é o parâmetro que mais pesa — a config antiga deixava a melodia no mesmo nível de uma faixa qualquer; com ele, o cover sai claramente acima da faixa aleatória. Ainda assim **não é cópia**: o ACE-Step re-sintetiza a faixa, então nota dominante ~0.39 é o teto prático (1.0 = cópia idêntica).
 
 **Na interface**
 
@@ -378,11 +405,14 @@ No modo cover o pedido sai assim:
     ]
   }],
   "task_type": "cover",
-  "audio_cover_strength": 0.85,
+  "audio_cover_strength": 0.98,
+  "cover_noise_strength": 0.7,
   "thinking": false,
   "audio_config": { "format": "mp3", "instrumental": false, "duration": 69 }
 }
 ```
+
+> `cover_noise_strength` é do ACE-Step 1.5: *"Cover noise blending strength (0.0=pure noise, 1.0=closest to source audio). Used for cover/repaint tasks."* — é ele que ancora a geração no áudio original.
 
 > O bloco `input_audio` é obrigatório no cover: sem ele a API responde `400` ("Task 'cover' requires source audio"). É por isso que o arquivo **não** vai num campo solto (`src_audio`) no corpo JSON — o endpoint compatível com OpenAI ignora esse campo e exige o bloco multimodal (verificado contra a API hospedada).
 
@@ -393,6 +423,7 @@ Duas diferenças do cover no provider (`server/providers/acestep.js`): o **LM 5H
 ```bash
 npm run test:modo                    # contrato + HTTP + navegador (Chromium headless, motor local)
 MUSICGPT_TESTE_LIVE=1 npm run test:modo   # gera de verdade no ACE-Step no modo cover
+npm run test:fidelidade -- <original> <cover>   # mede a fidelidade do cover (melodia/escala/ritmo)
 ```
 
 O teste confere o `task_type`/`audio_cover_strength` de cada modo, a rota HTTP (`audioMode` + tag), o seletor na interface, o card com a tag do modo e o **layout mobile** (sem overflow, seletor visível e clicável).
@@ -418,13 +449,37 @@ O teste do navegador anexa um áudio de referência, digita `Modern talking, che
 campo de estilo, clica em **Criar** e confere o card: a tag `ref: <arquivo>` aparece, a tag com o
 **texto exato** digitado aparece e o `"Pop"` do botão **não** aparece.
 
+### 4.0.4 Varinha mágica: sorteia estilo e tema (offline)
+
+Os dois blocos da tela "Criar" têm uma varinha (✨) que **sorteia** um item de uma lista local e escreve no campo:
+
+| Bloco | Botão | O que faz |
+|---|---|---|
+| **Estilos** | `#btnStyleWand` | Sorteia uma das **22 descrições de estilo** (`STYLE_SUGGESTIONS`) e preenche o campo de ideia. Como o texto passa a existir, `syncStylePriority()` entra em ação: os chips de gênero ficam esmaecidos e o aviso "O texto digitado tem prioridade" aparece (ver 4.0.3). |
+| **Letra** | `#btnLyricWand` | Sorteia um dos **22 temas de letra** (`LYRIC_THEMES`, ex.: "Uma música sobre um amor perdido no verão") e escreve no campo, que aceita sugestão (o placeholder já diz "ou uma sugestão"). O bloco é reaberto automaticamente. |
+| **Letra** | `#btnLyricAI` (✦) | **Não** sorteia: é o caminho antigo da varinha, que chama `POST /api/lyrics` e escreve a letra de verdade (IA se houver chave, senão o gerador local offline). |
+
+Regras do sorteio (`public/app.js`):
+
+- **Zero rede.** As listas vivem no front-end; nenhum request é feito. É por isso que funciona offline e não gasta cota de API.
+- **Sem repetição.** `pickRandom(lista, valorAtual)` remove o valor que já está no campo antes de sortear — dois cliques seguidos **nunca** devolvem a mesma sugestão (verificado no teste).
+- **Efeito visual.** `magicEffect(campo, botão)` adiciona a classe `is-magic`: `@keyframes magicGlow` (brilho roxo + fade no textarea) e `@keyframes magicSpin` (sacudida no botão). A classe sai no `animationend` (ou após 1,2 s), então o efeito se repete em cliques seguidos. Com `prefers-reduced-motion: reduce` a animação vira um anel fixo.
+
+**Teste**
+
+```bash
+npm run test:varinha                # navegador headless (Chromium), motor local, 19 verificações
+```
+
+O teste confere as duas listas (≥ 15 itens cada), que o clique preenche o campo com um item **da lista**, que a animação `is-magic` dispara no campo e no botão, que os chips de gênero ficam desativados (prioridade do texto), que dois cliques seguidos mudam a sugestão, que o bloco "Letra" é reaberto, que o botão **IA** continua gerando letra de verdade e que o layout **mobile** (390 px) segue sem overflow.
+
 ---
 
 ## 4.1 IA real via OpenRouter (letra + voz) — opcional
 
 O app **não depende** do OpenRouter para gerar música: quem faz isso é o ACE-Step. O OpenRouter continua disponível em dois pontos:
 
-1. **Botão "Escrever letra"** (`POST /api/lyrics`) — usa `openai/gpt-4o-mini` quando há chave.
+1. **Botão ✦ "IA" do bloco Letra** (`POST /api/lyrics`, id `#btnLyricAI`) — usa `openai/gpt-4o-mini` quando há chave. (A varinha ✨ do mesmo bloco **não** usa IA: ela só sorteia um tema.)
 2. **TTS** — só no motor local e **apenas** se você escolher "Voz por IA (OpenRouter)" na interface (ou `MUSICGPT_TTS_PROVIDER=openrouter`).
 
 Quando a chave está em `.env`:
@@ -525,7 +580,7 @@ cd musicgpt
 npm install          # só o encoder de MP3
 npm start            # porta 8787 (PORT=xxxx para trocar)
 npm run dev          # com --watch
-npm test             # testes locais (referência + estilo + modo do áudio + espectro + download) - servidor precisa estar no ar
+npm test             # testes locais (referência + estilo + varinha + modo do áudio + espectro + download) - servidor precisa estar no ar
 ```
 
 Variáveis úteis: `PORT`, `HOST`, `MUSICGPT_DATA_DIR`, `MUSICGPT_MUSIC_PROVIDER`, `MUSICGPT_LYRICS_PROVIDER`, `MUSICGPT_TTS_PROVIDER`, `ACESTEP_API_KEY`, `ACESTEP_BASE_URL`, `ACESTEP_MODEL`, `ACESTEP_THINKING`, `ACESTEP_VOCAL_LANGUAGE`, `ACESTEP_DURATION_FACTOR`, `ACESTEP_REFERENCE_STRENGTH`, `ACESTEP_TIMEOUT_MS`, `MUSICGPT_MAX_REFERENCE_BYTES`, `REPLICATE_API_TOKEN`, `FAL_KEY`, `OPENAI_API_KEY`, `OPENROUTER_API_KEY`, `MUSICGPT_SSL_CERT`, `MUSICGPT_SSL_KEY`.

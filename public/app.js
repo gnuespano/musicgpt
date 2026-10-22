@@ -24,6 +24,8 @@ const state = {
   referenceAudioFile: null,
   // modo do audio anexado: 'reference' (estilo/remix) ou 'cover' (melodia)
   audioMode: 'reference',
+  // fidelidade ao original no cover (0.8..1.0 -> audio_cover_strength)
+  coverStrength: 0.98,
   volume: 0.9,
   muted: false,
 };
@@ -118,8 +120,15 @@ function renderVarietyScale(value) {
   )).join('');
 }
 
+/**
+ * Ids dos botoes que abrem/fecham os blocos da tela "Criar".
+ * `expandBlock('lyrics')` precisa achar exatamente `#toggleLyrics`
+ * (o id e case sensitive no DOM).
+ */
+const BLOCK_TOGGLES = { lyrics: 'toggleLyrics', styles: 'toggleStyles', more: 'toggleMore' };
+
 function expandBlock(name) {
-  const btn = $(`#toggle${name}`);
+  const btn = $(`#${BLOCK_TOGGLES[name] || ''}`);
   if (btn) btn.closest('.block')?.classList.remove('is-collapsed');
 }
 
@@ -132,7 +141,7 @@ function updateVoiceButton() {
 }
 
 function bindCreateBlocks() {
-  [['lyrics', 'toggleLyrics'], ['styles', 'toggleStyles'], ['more', 'toggleMore']].forEach(([name, id]) => {
+  Object.values(BLOCK_TOGGLES).forEach((id) => {
     const btn = $(`#${id}`);
     btn?.addEventListener('click', () => btn.closest('.block')?.classList.toggle('is-collapsed'));
   });
@@ -217,18 +226,33 @@ function setAudioMode(mode) {
 /** Reflete o modo atual nos botoes de radio e no texto de ajuda. */
 function syncAudioMode() {
   const modo = state.audioMode || AUDIO_MODES.REFERENCE;
+  const isCover = modo === AUDIO_MODES.COVER;
   $$('input[name="audioMode"]').forEach((input) => {
     input.checked = input.value === modo;
     input.closest('.audio-mode')?.classList.toggle('is-on', input.checked);
   });
   const box = $('#refAudioBox');
   if (box) box.dataset.mode = modo;
+  // o slider de fidelidade so faz sentido no cover
+  const fidelidade = $('#coverFidelity');
+  if (fidelidade) fidelidade.hidden = !isCover;
+  syncCoverStrength();
   const btn = $('#btnAddAudio');
   if (btn && state.referenceAudioFile) {
-    btn.title = modo === AUDIO_MODES.COVER
+    btn.title = isCover
       ? `Cover: manter a melodia de ${state.referenceAudioFile.name}`
       : `Áudio de referência (estilo): ${state.referenceAudioFile.name}`;
   }
+}
+
+/** Escreve o valor do slider de fidelidade (0.8..1.0) e o guarda no estado. */
+function syncCoverStrength() {
+  const slider = $('#coverStrength');
+  if (!slider) return;
+  const value = Math.min(1, Math.max(0.8, Number(slider.value) || 0.98));
+  state.coverStrength = Math.round(value * 100) / 100;
+  const label = $('#coverFidelityValue');
+  if (label) label.textContent = `${Math.round(state.coverStrength * 100)}%`;
 }
 
 function clearReferenceAudio() {
@@ -362,6 +386,99 @@ function syncStylePriority() {
 }
 
 /* ------------------------------------------------------------------ *
+ * Varinha mágica: estilo e tema aleatórios
+ * ------------------------------------------------------------------ */
+
+/**
+ * Sugestões de ESTILO (descrições curtas que o motor local e o ACE-Step
+ * entendem). A varinha do bloco "Estilos" sorteia uma delas.
+ */
+const STYLE_SUGGESTIONS = [
+  'Rock alternativo dos anos 90 com guitarra distorcida e bateria seca',
+  'Lo-fi chill com piano suave, chuva de fundo e textura de vinil',
+  'Trap pesado com 808 grave, hi-hats rápidos e sintetizadores escuros',
+  'MPB melancólica com violão, pandeiro e saxofone ao fundo',
+  'Synthwave dos anos 80 com sintetizadores neon e bateria eletrônica',
+  'Samba de roda animado com pandeiro, cavaquinho e surdo no refrão',
+  'Funk brasileiro com tambor, baixo elétrico e bordões gritando',
+  'Pop dance dos anos 2000 com sintetizadores brilhantes e refrão grudento',
+  'Jazz de madrugada com piano, contrabaixo e saxofone quente',
+  'Bossa nova leve com violão de nylon e percussão discreta',
+  'Reggae tranquilo com baixo round, skank no violão e melodia solta',
+  'Rock progressivo com guitarra limpa, sintetizadores e solos longos',
+  'Forró de vaqueiro com sanfona, triângulo e bateria de baile',
+  'Gospel soul com coro, piano e dinâmica crescente no refrão',
+  'Indie folk acústico com violão, bumbo leve e vozes em dupla',
+  'House club com kick de quatro tempos, hi-hat e sintetizador pulsante',
+  'Balada de piano com cordas orquestrais e refrão em tom menor',
+  'K-pop animado com beat dance, sintetizadores brilhantes e refrão coreografado',
+  'R&B neosoul com baixo encorpado, Rhodes e grooves relaxados',
+  'Rockabilly dos anos 50 com guitarra twang, contrabaixo e bateria scrub',
+  'Amapiano com piano log drum, percussão africana e melodia etérea',
+  'Sertanejo universitário com viola, sanfona e batida em dois',
+];
+
+/**
+ * Temas de LETRA (ideias para a música). A varinha do bloco "Letra"
+ * sorteia um deles e escreve no campo.
+ */
+const LYRIC_THEMES = [
+  'Uma música sobre dirigir na estrada à noite',
+  'Uma música sobre um amor perdido no verão',
+  'Uma música sobre uma carta que nunca foi enviada',
+  'Uma música sobre voltar para casa depois de anos fora',
+  'Uma música sobre a coragem de recomeçar do zero',
+  'Uma música sobre a saudade da infância na praia',
+  'Uma música sobre ficar anos no mesmo emprego',
+  'Uma música sobre dançar a música que você mesmo escreveu',
+  'Uma música sobre ficar preso no trânsito na chuva',
+  'Uma música sobre o último café da manhã juntos',
+  'Uma música sobre aceitar que o fim já chegou',
+  'Uma música sobre a cidade que nunca dorme',
+  'Uma música sobre um amigo que desapareceu sem avisar',
+  'Uma música sobre trocar de vida aos 40 anos',
+  'Uma música sobre o som da chuva no telhado de zinco',
+  'Uma música sobre se despedir do cachorro no veterinário',
+  'Uma música sobre o primeiro salário e a liberdade',
+  'Uma música sobre a festa que só acaba às seis da manhã',
+  'Uma música sobre se perdoar depois de anos de mágoa',
+  'Uma música sobre a montanha que você prometeu escalar',
+  'Uma música sobre uma viagem de ônibus sem destino certo',
+  'Uma música sobre a saudade de tocar violão à meia-noite',
+];
+
+/**
+ * Sorteia um item da lista, evitando repetir o valor atual do campo
+ * (quando ele esta na lista) — assim dois cliques seguidos sempre
+ * mudam a sugestao.
+ */
+function pickRandom(list, avoid = '') {
+  if (!Array.isArray(list) || !list.length) return '';
+  const pool = list.length > 1 ? list.filter((item) => item !== avoid) : list;
+  return pool[Math.floor(Math.random() * pool.length)];
+}
+
+/**
+ * Efeito visual da varinha: brilho + fade no campo preenchido e uma
+ * sacudida no botao. A classe `is-magic` e removida no fim da animacao
+ * (ou depois de 1.2 s) para o efeito poder se repetir em cliques seguidos.
+ */
+function magicEffect(field, btn) {
+  [field, btn].filter(Boolean).forEach((el) => {
+    el.classList.remove('is-magic');
+    void el.offsetWidth; // reinicia a animacao
+    el.classList.add('is-magic');
+    const clear = () => el.classList.remove('is-magic');
+    el.addEventListener('animationend', clear, { once: true });
+    setTimeout(clear, 1200);
+  });
+}
+
+// exposto para os testes locais (scripts/testar-varinha.mjs)
+window.MUSICGPT_STYLE_SUGGESTIONS = STYLE_SUGGESTIONS;
+window.MUSICGPT_LYRIC_THEMES = LYRIC_THEMES;
+
+/* ------------------------------------------------------------------ *
  * Geração
  * ------------------------------------------------------------------ */
 
@@ -404,6 +521,8 @@ async function generate() {
       lyrics: $('#customLyrics').value.trim(),
       // modo do audio anexado: 'reference' (estilo/remix) ou 'cover'
       audioMode: state.audioMode || AUDIO_MODES.REFERENCE,
+      // fidelidade ao original (cover): 0.8..1.0
+      coverStrength: state.coverStrength ?? 0.98,
     };
 
     const reference = state.referenceAudioFile;
@@ -466,6 +585,7 @@ function watchJob(jobId, btn) {
           ${track.lofi ? '<span class="tag">chuva</span>' : ''}
           ${track.referenceAudio?.used ? `<span class="tag">ref: ${escapeHtml(track.referenceAudio.name)}</span>` : ''}
           ${track.audioMode ? `<span class="tag">${escapeHtml(AUDIO_MODE_LABEL[track.audioMode] || `modo: ${track.audioMode}`)}</span>` : ''}
+          ${track.audioMode === 'cover' && track.coverStrength ? `<span class="tag">fidelidade ${Math.round(track.coverStrength * 100)}%</span>` : ''}
           ${track.engine ? `<span class="tag">${escapeHtml(track.engine || '')}</span>` : ''}
           ${track.voiceInfo?.engine === 'openrouter' ? '<span class="tag">voz IA</span>' : ''}
           ${track.voiceInfo?.engine === 'acestep' ? '<span class="tag">voz ACE-Step</span>' : ''}
@@ -1396,6 +1516,8 @@ function bind() {
         : 'Estilo (remix): o áudio entra só como referência de estilo.', 'ok');
     });
   });
+  // slider "Fidelidade ao Original" (so no cover)
+  $('#coverStrength').addEventListener('input', syncCoverStrength);
   $('#btnRemoveRefAudio').addEventListener('click', () => {
     clearReferenceAudio();
     toast('Áudio de referência removido.', 'info');
@@ -1409,15 +1531,26 @@ function bind() {
     toast('Geração cancelada.', 'info');
   });
 
-  // varinha da letra: gera a letra com IA e coloca no bloco "Letra"
-  $('#btnLyricWand').addEventListener('click', async () => {
+  // varinha da letra: sorteia um tema aleatorio para o campo "Letra"
+  $('#btnLyricWand').addEventListener('click', () => {
+    const campo = $('#customLyrics');
+    const tema = pickRandom(LYRIC_THEMES, campo.value.trim());
+    if (!tema) return;
+    campo.value = tema;
+    expandBlock('lyrics');
+    magicEffect(campo, $('#btnLyricWand'));
+    toast('Tema sorteado — escreva a letra a partir dele.', 'ok');
+  });
+
+  // "IA" no bloco da letra: gera a letra de verdade (mesmo caminho de antes)
+  $('#btnLyricAI').addEventListener('click', async () => {
     const prompt = $('#prompt').value.trim() || $('#lyricsPrompt').value.trim();
     if (!prompt) {
       toast('Escreva um estilo primeiro — a letra nasce da ideia.', 'error');
       $('#prompt').focus();
       return;
     }
-    const btn = $('#btnLyricWand');
+    const btn = $('#btnLyricAI');
     btn.classList.add('is-busy');
     try {
       const res = await api('/api/lyrics', { method: 'POST', body: { prompt, mode: 'full' } });
@@ -1431,25 +1564,15 @@ function bind() {
     }
   });
 
-  // varinha de estilo: sugere uma descricao de estilo coerente
+  // varinha de estilo: sorteia uma descricao de estilo aleatoria
   $('#btnStyleWand').addEventListener('click', () => {
-    const genre = selectedGenre();
-    const label = $('#genreChips .chip.is-on')?.textContent || 'Pop';
-    const mood = $('#mood').value;
-    const extras = {
-      lofi: 'com chuva de fundo e textura de vinil',
-      rock: 'com guitarra distorcida e bateria seca',
-      mpb: 'com violão, pandeiro e groove brasileiro',
-      trap: 'com 808 pesado, hi-hats rápidos e sintetizadores escuros',
-      samba: 'com surdo, tamborim e pandeiro',
-      house: 'com kick de quatro tempos e sintetizador pulsante',
-      forro: 'com sanfona, triângulo e bateria de vaqueiro',
-      gospel: 'com coro, piano e dinâmica crescente',
-    };
-    const suggestion = `${label} ${mood === 'alegre' ? 'energético' : mood} ${extras[genre] || 'com produção limpa e foco na melodia'}`;
-    $('#prompt').value = suggestion;
+    const campo = $('#prompt');
+    const sugestao = pickRandom(STYLE_SUGGESTIONS, campo.value.trim());
+    if (!sugestao) return;
+    campo.value = sugestao;
     syncStylePriority();
-    toast('Estilo sugerido. Ajuste como quiser.', 'ok');
+    magicEffect(campo, $('#btnStyleWand'));
+    toast('Estilo sorteado — ajuste como quiser.', 'ok');
   });
 
   // "+ Voz": escolhe o motor e a voz

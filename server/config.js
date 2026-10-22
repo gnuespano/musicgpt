@@ -113,10 +113,17 @@ export const ACESTEP = {
    * Peso do audio de origem no modo COVER (`task_type: "cover"`): o modelo
    * tenta manter a melodia e a estrutura do arquivo original. A
    * documentacao do ACE-Step usa 1.0 para um cover colado no original e
-   * ~0.2 so para referencia de estilo; 0.85 mantem a melodia bem proxima
-   * sem ser uma copia identica.
+   * ~0.2 so para referencia de estilo; o valor alto (0.98) trava a
+   * geracao na estrutura original.
    */
-  coverStrength: Number(process.env.ACESTEP_COVER_STRENGTH || 0.85),
+  coverStrength: Number(process.env.ACESTEP_COVER_STRENGTH || 0.98),
+  /**
+   * `cover_noise_strength` do ACE-Step: quanto o audio de origem "ancora" a
+   * geracao. A documentacao define 0.0 = ruido puro (sem cover) e 1.0 =
+   * mais proximo do audio de origem. Com 0.7 a faixa nasce colada no
+   * original (melodia, ritmo e timbre).
+   */
+  coverNoiseStrength: Number(process.env.ACESTEP_COVER_NOISE_STRENGTH || 0.7),
 };
 
 /** Valores de exemplo: nao contam como chave configurada. */

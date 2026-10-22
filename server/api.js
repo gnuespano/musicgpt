@@ -337,6 +337,9 @@ async function executeJob(job, options, referenceAudio = null) {
       audioMode: referenceAudio
         ? (result.meta?.audioMode || options.audioMode)
         : null,
+      // fidelidade usada no cover (0.8..1.0)
+      coverStrength: result.meta?.coverStrength ?? null,
+      coverNoiseStrength: result.meta?.coverNoiseStrength ?? null,
       lofi: Boolean(options.lofi),
       engine: result.meta?.engine || effectiveProvider,
       provider: effectiveProvider,
@@ -490,6 +493,9 @@ export const handlers = {
       styleFromText,
       // modo do audio anexado: referencia de estilo (remix) ou cover
       audioMode,
+      // fidelidade ao original no cover (slider "Fidelidade ao Original")
+      coverStrength: Number(body.coverStrength),
+      coverNoiseStrength: Number(body.coverNoiseStrength),
       instrumental: asBool(body.instrumental),
       duration: Math.min(MAX_DURATION_SEC, Math.max(20, Number(body.duration) || 75)),
       voiceStyle: VOICE_STYLES[body.voiceStyle] ? body.voiceStyle : genre.vocal,

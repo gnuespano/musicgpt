@@ -154,9 +154,12 @@ const pedidoCover = buildRequestBody({
 });
 check('modo cover: task_type cover',
   pedidoCover.task_type === 'cover', String(pedidoCover.task_type));
-check('modo cover: audio_cover_strength 0.85 (mantem a melodia)',
-  Math.abs(pedidoCover.audio_cover_strength - 0.85) < 0.001,
+check('modo cover: audio_cover_strength alto (0.98, fidelidade maxima)',
+  Math.abs(pedidoCover.audio_cover_strength - 0.98) < 0.001,
   String(pedidoCover.audio_cover_strength));
+check('modo cover: cover_noise_strength ancora no audio original (0.7)',
+  Math.abs(pedidoCover.cover_noise_strength - 0.7) < 0.001,
+  String(pedidoCover.cover_noise_strength));
 check('modo cover: o audio de origem vai no bloco multimodal input_audio',
   Array.isArray(pedidoCover.messages[0].content)
   && pedidoCover.messages[0].content[1]?.type === 'input_audio'
@@ -164,6 +167,43 @@ check('modo cover: o audio de origem vai no bloco multimodal input_audio',
   JSON.stringify(pedidoCover.messages[0].content?.[1]?.input_audio || null));
 check('modo cover: o LM e desligado (a API pula o LM em cover)',
   pedidoCover.thinking === false, String(pedidoCover.thinking));
+
+const pedidoCoverSlider = buildRequestBody({
+  prompt: ESTILO,
+  lyrics: '',
+  style: ESTILO,
+  styleFromText: true,
+  options: {
+    duration: 30,
+    genreLabel: 'Pop',
+    referenceAudio: refAudio,
+    audioMode: 'cover',
+    coverStrength: 0.87,
+  },
+});
+check('modo cover: o slider ajusta a fidelidade (0.87)',
+  Math.abs(pedidoCoverSlider.audio_cover_strength - 0.87) < 0.001,
+  String(pedidoCoverSlider.audio_cover_strength));
+check('modo cover: o cover_noise_strength continua valendo com o slider',
+  Math.abs(pedidoCoverSlider.cover_noise_strength - 0.7) < 0.001,
+  String(pedidoCoverSlider.cover_noise_strength));
+
+const pedidoCoverInvalido = buildRequestBody({
+  prompt: ESTILO,
+  lyrics: '',
+  style: ESTILO,
+  styleFromText: true,
+  options: {
+    duration: 30,
+    genreLabel: 'Pop',
+    referenceAudio: refAudio,
+    audioMode: 'cover',
+    coverStrength: 7,
+  },
+});
+check('modo cover: valor fora da faixa e limitado a 1.0',
+  pedidoCoverInvalido.audio_cover_strength === 1,
+  String(pedidoCoverInvalido.audio_cover_strength));
 
 const pedidoCoverComLetra = buildRequestBody({
   prompt: ESTILO,
@@ -216,6 +256,16 @@ try {
     jobCover.track?.audioMode === 'cover', JSON.stringify(jobCover.track?.audioMode));
   check('HTTP com cover: a tag "modo: cover" aparece',
     (jobCover.track?.tags || []).includes('modo: cover'), JSON.stringify(jobCover.track?.tags));
+
+  const resSlider = await fetch(`${server.url}/api/generate`, {
+    method: 'POST',
+    body: form({
+      prompt: ESTILO, style: ESTILO, audioMode: 'cover', coverStrength: '0.9', duration: 25, instrumental: 'true',
+    }),
+  });
+  const jobSlider = await waitJob(server.url, (await resSlider.json()).jobId);
+  check('HTTP com cover: o slider de fidelidade e aceito pela rota',
+    jobSlider.track?.audioMode === 'cover', JSON.stringify(jobSlider.track?.audioMode));
 
   const resRef = await fetch(`${server.url}/api/generate`, {
     method: 'POST',
@@ -317,11 +367,40 @@ try {
     estado: window.__modoAudio ?? null,
     box: document.querySelector('#refAudioBox').dataset.mode || null,
     titulo: document.querySelector('#btnAddAudio').title,
+    sliderVisivel: !document.querySelector('#coverFidelity').hidden,
+    sliderValor: document.querySelector('#coverStrength').value,
+    sliderRotulo: document.querySelector('#coverFidelityValue').textContent,
   }))`);
   check('navegador: escolher "cover" marca o radio e guarda o modo',
     marcado.marcado === 'cover' && marcado.box === 'cover', JSON.stringify(marcado));
   check('navegador: o botao de audio avisa que agora e cover',
     /cover/i.test(marcado.titulo), marcado.titulo);
+  check('navegador: o slider de fidelidade aparece no modo cover',
+    marcado.sliderVisivel && marcado.sliderRotulo === '98%', JSON.stringify(marcado));
+
+  // ---------- 3.3 slider de fidelidade ----------
+  await browser.cdp.eval(`(() => {
+    const slider = document.querySelector('#coverStrength');
+    slider.value = '0.9';
+    slider.dispatchEvent(new Event('input', { bubbles: true }));
+    return true;
+  })`);
+  await delay(200);
+  const slider = await browser.cdp.eval(`(() => ({
+    valor: document.querySelector('#coverStrength').value,
+    rotulo: document.querySelector('#coverFidelityValue').textContent,
+  }))`);
+  check('navegador: o slider ajusta a fidelidade e o rotulo acompanha',
+    slider.valor === '0.9' && slider.rotulo === '90%', JSON.stringify(slider));
+
+  // volta ao maximo para o resto do teste
+  await browser.cdp.eval(`(() => {
+    const s = document.querySelector('#coverStrength');
+    s.value = '0.98';
+    s.dispatchEvent(new Event('input', { bubbles: true }));
+    return true;
+  })`);
+  await delay(150);
 
   // ---------- 3.3 preenche o estilo e clica em Criar ----------
   await browser.cdp.eval(`(() => {
@@ -386,6 +465,8 @@ try {
   const campos = enviado[0]?.campos || {};
   check('navegador: o pedido manda audioMode=cover',
     campos.audioMode === 'cover', `audioMode=${JSON.stringify(campos.audioMode)}`);
+  check('navegador: o pedido manda a fidelidade (coverStrength)',
+    Number(campos.coverStrength) === 0.98, `coverStrength=${JSON.stringify(campos.coverStrength)}`);
   check('navegador: o pedido manda o audio anexado',
     /\[arquivo:minha-referencia\.wav\]/.test(String(campos.referenceAudio)),
     String(campos.referenceAudio));
@@ -404,11 +485,14 @@ try {
     });
     const radio = document.querySelector('input[name="audioMode"]');
     const rr = radio.getBoundingClientRect();
+    const slider = document.querySelector('#coverStrength');
+    const sr = slider.getBoundingClientRect();
     return {
       overflowX: document.documentElement.scrollWidth - window.innerWidth,
       boxVisivel: box && !box.hidden,
       opcoes,
       radioVisivel: rr.width > 0 && rr.height > 0,
+      sliderVisivel: sr.width > 0 && sr.height > 0,
       viewport: window.innerWidth,
     };
   })`);
@@ -417,6 +501,8 @@ try {
     mobile.boxVisivel && mobile.opcoes.every((o) => o.visivel), JSON.stringify(mobile.opcoes));
   check('mobile: o radio do modo e clicavel (tamanho minimo)',
     mobile.radioVisivel, JSON.stringify(mobile));
+  check('mobile: o slider de fidelidade continua visivel',
+    mobile.sliderVisivel, JSON.stringify(mobile));
 
   await browser.cdp.send('Emulation.clearDeviceMetricsOverride');
   await delay(300);

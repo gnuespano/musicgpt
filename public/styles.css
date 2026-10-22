@@ -504,6 +504,19 @@ code { background: #0e0e15; border: 1px solid var(--line); border-radius: 5px; p
 .audio-mode-text b { font-size: 12.5px; font-weight: 600; color: var(--text); }
 .audio-mode-text small { font-size: 11px; color: var(--muted); line-height: 1.35; }
 
+/* slider de fidelidade ao original (so no modo cover) */
+.cover-fidelity {
+  flex: 1 0 100%;
+  display: flex; flex-direction: column; gap: 2px;
+  margin-top: 2px; padding-top: 8px;
+  border-top: 1px solid rgba(124, 92, 255, .25);
+}
+.cover-fidelity[hidden] { display: none; }
+.cover-fidelity .field-label { font-size: 12px; color: var(--muted); }
+.cover-fidelity .field-label b { color: var(--text); }
+.cover-fidelity input[type="range"] { width: 100%; margin: 4px 0 2px; }
+.cover-fidelity .hint { margin-left: 0; }
+
 .block {
   border: 1px solid var(--line);
   border-radius: var(--radius-sm);
@@ -535,6 +548,37 @@ code { background: #0e0e15; border: 1px solid var(--line); border-radius: 5px; p
 .icon-btn.wand:hover { filter: brightness(1.06); }
 .icon-btn.wand svg { width: 17px; height: 17px; }
 .icon-btn.wand.is-busy { opacity: .6; pointer-events: none; }
+
+/* botao "IA" ao lado da varinha: gera a letra com IA (fora do sorteio) */
+.head-actions { display: flex; align-items: center; gap: 6px; flex: none; }
+.icon-btn.wand-ai {
+  width: 34px; height: 34px; flex: none;
+  background: linear-gradient(135deg, rgba(124, 92, 255, .28), rgba(180, 108, 255, .16));
+  border-color: rgba(124, 92, 255, .45); color: #d9ceff;
+  box-shadow: 0 4px 14px rgba(124, 92, 255, .18);
+}
+.icon-btn.wand-ai:hover { filter: brightness(1.12); border-color: var(--brand); }
+.icon-btn.wand-ai svg { width: 17px; height: 17px; }
+.icon-btn.wand-ai.is-busy { opacity: .6; pointer-events: none; }
+
+/* varinha magica: brilho + fade no campo preenchido e no botao clicado */
+@keyframes magicGlow {
+  0%   { opacity: .25; transform: scale(.985); box-shadow: 0 0 0 0 rgba(180, 108, 255, 0); }
+  40%  { opacity: 1; transform: scale(1); box-shadow: 0 0 0 5px rgba(180, 108, 255, .26), 0 0 28px rgba(180, 108, 255, .55); }
+  100% { opacity: 1; transform: scale(1); box-shadow: 0 0 0 0 rgba(180, 108, 255, 0); }
+}
+@keyframes magicSpin {
+  0%   { transform: rotate(0deg) scale(1); }
+  35%  { transform: rotate(-22deg) scale(1.18); }
+  70%  { transform: rotate(12deg) scale(1.05); }
+  100% { transform: rotate(0deg) scale(1); }
+}
+textarea.is-magic { animation: magicGlow .8s ease-out; }
+.icon-btn.wand.is-magic { animation: magicSpin .6s ease; }
+
+@media (prefers-reduced-motion: reduce) {
+  textarea.is-magic, .icon-btn.wand.is-magic { animation: none; box-shadow: 0 0 0 3px rgba(180, 108, 255, .45); }
+}
 
 /* slider de variedade com marcas */
 .variety-scale { position: relative; height: 14px; margin-top: -4px; }

@@ -180,6 +180,15 @@ export function buildRequestBody({ prompt, lyrics, style, styleFromText = false,
   const reference = options.referenceAudio || null;
   const audioMode = normalizeAudioMode(options.audioMode);
   const isCover = reference && audioMode === AUDIO_MODES.COVER;
+  // fidelidade ao original (slider da UI): 0.8..1.0, padrao do servidor
+  const coverStrength = Number.isFinite(Number(options.coverStrength))
+    && Number(options.coverStrength) > 0
+    ? Math.min(1, Math.max(0, Number(options.coverStrength)))
+    : ACESTEP.coverStrength;
+  const coverNoiseStrength = Number.isFinite(Number(options.coverNoiseStrength))
+    && Number(options.coverNoiseStrength) > 0
+    ? Math.min(1, Math.max(0, Number(options.coverNoiseStrength)))
+    : ACESTEP.coverNoiseStrength;
 
   const textContent = cleanLyrics
     ? `<prompt>${caption}</prompt><lyrics>${cleanLyrics}</lyrics>`
@@ -224,7 +233,11 @@ export function buildRequestBody({ prompt, lyrics, style, styleFromText = false,
     if (isCover) {
       // COVER: o audio anexado e o `src_audio` (melodia/estrutura original)
       body.task_type = 'cover';
-      body.audio_cover_strength = ACESTEP.coverStrength;
+      // fidelidade ao original: o cliente pode ajustar (slider da UI) entre
+      // 0.8 e 1.0; o padrao do servidor e o valor mais alto.
+      body.audio_cover_strength = coverStrength;
+      // ancora a geracao no audio original (0 = ruido puro, 1 = colado)
+      body.cover_noise_strength = coverNoiseStrength;
     } else {
       // REFERENCIA DE ESTILO: o audio anexado vira `reference_audio`
       body.task_type = 'text2music';
@@ -458,7 +471,7 @@ async function computeAudioPeaks(buffer, format) {
  * @param {string} style   estilo efetivo (texto digitado ou genero do botao)
  * @param {object} options { duration, instrumental, genreLabel, moodLabel, lofi,
  *                           trackId, onProgress, referenceAudio, styleFromText,
- *                           audioMode }
+ *                           audioMode, coverStrength, coverNoiseStrength }
  * @returns {Promise<{buffer: Buffer, format: string, duration: number|null,
  *                    file: string, path: string, meta: object}>}
  */
@@ -480,7 +493,7 @@ export async function generateAceMusic(prompt, lyrics, style, options = {}) {
     pct: 20,
     detail: reference
       ? (audioMode === AUDIO_MODES.COVER
-        ? `cover do audio (${reference.format})`
+        ? `cover do audio (${reference.format}, fidelidade ${body.audio_cover_strength})`
         : `estilo a partir do audio (${reference.format})`)
       : (body.sample_mode ? 'o modelo escreve a letra' : 'letra + estilo'),
   });
@@ -562,8 +575,12 @@ export async function generateAceMusic(prompt, lyrics, style, options = {}) {
     : null;
   // modo usado com o audio anexado (cover = manter a melodia original)
   meta.audioMode = reference ? audioMode : null;
+  // parametros de fidelidade realmente enviados no cover
   meta.coverStrength = reference && audioMode === AUDIO_MODES.COVER
-    ? ACESTEP.coverStrength
+    ? body.audio_cover_strength
+    : null;
+  meta.coverNoiseStrength = reference && audioMode === AUDIO_MODES.COVER
+    ? body.cover_noise_strength
     : null;
 
   // salva o MP3 no servidor e devolve o caminho local para o player
