@@ -256,6 +256,64 @@ function selectedGenre() {
 }
 
 /* ------------------------------------------------------------------ *
+ * Prioridade do estilo: texto > botao de genero
+ * ------------------------------------------------------------------ */
+
+/**
+ * Texto digitado no campo "Estilos".
+ *
+ * O texto tem PRIORIDADE ABSOLUTA sobre os botoes de genero: quando ele
+ * existe, o genero escolhido nos chips (Pop, MPB, ...) e completamente
+ * ignorado - nem no pedido enviado ao servidor nem na caption que vai
+ * para a API do ACE-Step.
+ */
+function styleText() {
+  return ($('#prompt')?.value || '').trim();
+}
+
+/**
+ * Resolve o estilo que sera enviado ao backend.
+ *
+ * - texto preenchido -> o texto manda (o genero do botao e ignorado);
+ * - texto vazio       -> o botao selecionado entra como fallback.
+ */
+function resolveStyleSelection() {
+  const text = styleText();
+  if (text) {
+    return { text, genre: '', source: 'text' };
+  }
+  return { text: '', genre: state.touched.genre ? selectedGenre() : '', source: 'genre' };
+}
+
+/**
+ * Reflexo visual da prioridade: com o campo "Estilos" preenchido, os
+ * botoes de genero ficam esmaecidos/desativados (e nao aceitam clique)
+ * para deixar claro que NAO vao ser usados no pedido.
+ */
+function syncStylePriority() {
+  const chips = $('#genreChips');
+  if (!chips) return;
+  const usandoTexto = Boolean(styleText());
+
+  chips.classList.toggle('is-overridden', usandoTexto);
+  chips.setAttribute('aria-disabled', usandoTexto ? 'true' : 'false');
+
+  $$('#genreChips .chip').forEach((chip) => {
+    chip.classList.toggle('is-off', usandoTexto);
+    chip.setAttribute('aria-disabled', usandoTexto ? 'true' : 'false');
+    chip.title = usandoTexto
+      ? 'Ignorado: o texto digitado em Estilos tem prioridade'
+      : 'Usado apenas quando o campo Estilos estiver vazio';
+  });
+
+  const hint = $('#styleHint');
+  if (hint) {
+    hint.hidden = !usandoTexto;
+    hint.textContent = 'O texto digitado tem prioridade — os botões de gênero não serão usados.';
+  }
+}
+
+/* ------------------------------------------------------------------ *
  * Geração
  * ------------------------------------------------------------------ */
 
@@ -276,10 +334,16 @@ async function generate() {
 
   let payload;
   try {
+    // Prioridade ABSOLUTA do texto do campo "Estilos": quando ele esta
+    // preenchido, o genero dos botoes nao entra no pedido. Sem texto, o
+    // botao selecionado entra como fallback.
+    const estilo = resolveStyleSelection();
+
     const fields = {
       prompt,
       title: $('#title').value.trim(),
-      genre: state.touched.genre ? selectedGenre() : '',
+      genre: estilo.genre,
+      style: estilo.text,
       mood: state.touched.mood ? $('#mood').value : '',
       voiceStyle: $('#voice').value,
       duration: Number($('#duration').value),
@@ -337,11 +401,14 @@ function watchJob(jobId, btn) {
       $('#statusRunning').hidden = true;
       $('#statusDone').hidden = false;
       const track = payload.track;
+      // O estilo exibido e o que foi realmente usado: o texto digitado no
+      // campo "Estilos" (quando existe) ou o genero do botao (fallback).
+      const estiloUsado = track.styleLabel || track.style || track.genreLabel || '';
       $('#doneTitle').textContent = 'Faixa pronta';
       $('#doneCard').innerHTML = `
         <div class="done-title">${escapeHtml(track.title)}</div>
         <div class="done-tags">
-          <span class="tag">${escapeHtml(track.genreLabel || '')}</span>
+          <span class="tag">${escapeHtml(estiloUsado)}</span>
           <span class="tag">${escapeHtml(track.moodLabel || '')}</span>
           <span class="tag">${Math.round(track.duration)}s</span>
           ${track.bpm ? `<span class="tag">${track.bpm} BPM</span>` : ''}
@@ -367,12 +434,16 @@ function watchJob(jobId, btn) {
       mp3Btn.disabled = false;
       mp3Btn.title = 'Baixar o audio gerado em .mp3';
       $('#btnOpenDone').onclick = () => { showView('biblioteca'); loadTracks(); };
-      // reflete o genero/clima efetivamente usados (podem ter sido detectados pelo prompt)
-      const usedChip = $(`#genreChips .chip[data-genre="${track.genre}"]`);
-      if (usedChip) {
-        $$('#genreChips .chip').forEach((c) => c.classList.remove('is-on'));
-        usedChip.classList.add('is-on');
-        state.touched.genre = true;
+      // reflete o genero/clima efetivamente usados (podem ter sido detectados
+      // pelo prompt). Com o texto de Estilos preenchido o genero do botao nao
+      // foi usado: nesse caso os chips ficam como estao.
+      if (track.styleSource !== 'text') {
+        const usedChip = $(`#genreChips .chip[data-genre="${track.genre}"]`);
+        if (usedChip) {
+          $$('#genreChips .chip').forEach((c) => c.classList.remove('is-on'));
+          usedChip.classList.add('is-on');
+          state.touched.genre = true;
+        }
       }
       if (track.mood) {
         $('#mood').value = track.mood;
@@ -506,7 +577,7 @@ function trackCard(t) {
       <div class="cover">${escapeHtml((t.title || '♪').trim().charAt(0).toUpperCase())}</div>
       <div class="track-info">
         <strong title="${escapeHtml(t.title)}">${escapeHtml(t.title)}</strong>
-        <span>${escapeHtml(t.genreLabel || '')} · ${escapeHtml(t.moodLabel || '')}</span>
+        <span>${escapeHtml(t.styleLabel || t.genreLabel || '')} · ${escapeHtml(t.moodLabel || '')}</span>
       </div>
     </div>
     <div class="wave">${bars}</div>
@@ -862,7 +933,7 @@ function playTrack(track, queue = null) {
 
 function updatePlayerMeta(track) {
   $('#playerTitle').textContent = track.title;
-  $('#playerSub').textContent = `${track.genreLabel || ''} · ${track.moodLabel || ''} · ${fmtTime(track.duration)}`;
+  $('#playerSub').textContent = `${track.styleLabel || track.genreLabel || ''} · ${track.moodLabel || ''} · ${fmtTime(track.duration)}`;
   $('#playerCover').innerHTML = '<span class="cover-letter">' + escapeHtml((track.title || '♪').trim().charAt(0).toUpperCase()) + '</span>';
   $('#playerDuration').textContent = fmtTime(track.duration);
 }
@@ -1231,9 +1302,16 @@ function bind() {
   });
 
   $('#mood').addEventListener('change', () => { state.touched.mood = true; });
+  // o texto do campo "Estilos" tem prioridade sobre os botoes de genero:
+  // enquanto ele existir, os chips ficam visualmente desativados.
+  $('#prompt').addEventListener('input', syncStylePriority);
   $('#genreChips').addEventListener('click', (ev) => {
     const chip = ev.target.closest('.chip');
     if (!chip) return;
+    if (styleText()) {
+      toast('O texto de Estilos tem prioridade — os botões de gênero não serão usados.', 'info');
+      return;
+    }
     $$('#genreChips .chip').forEach((c) => c.classList.remove('is-on'));
     chip.classList.add('is-on');
     state.touched.genre = true;
@@ -1308,6 +1386,7 @@ function bind() {
     };
     const suggestion = `${label} ${mood === 'alegre' ? 'energético' : mood} ${extras[genre] || 'com produção limpa e foco na melodia'}`;
     $('#prompt').value = suggestion;
+    syncStylePriority();
     toast('Estilo sugerido. Ajuste como quiser.', 'ok');
   });
 
@@ -1649,6 +1728,7 @@ async function boot() {
   await loadConfig();
   await loadTracks();
   await loadPlaylists();
+  syncStylePriority();
   try {
     const res = await api('/api/profile');
     state.profile = res.profile;

@@ -28,6 +28,10 @@ export async function generateWithLocalProvider(options, onProgress) {
 /**
  * ACE-Step 1.5: caption (estilo) + letra + thinking:true (LM 5Hz).
  * O audio volta em base64, e decodificado e salvo em data/tracks.
+ *
+ * `style` ja vem resolvido pela API: quando o usuario digitou um estilo no
+ * campo "Estilos", ele tem prioridade sobre o genero do botao
+ * (`styleFromText: true` -> o caption nao acrescenta "X style").
  */
 export async function generateWithAceStep(options, onProgress) {
   return generateAceMusic(
@@ -125,7 +129,9 @@ export async function generateWithFal(options, onProgress) {
 
 function buildPrompt(options) {
   const parts = [options.prompt];
-  if (options.genreLabel) parts.push(`genre: ${options.genreLabel}`);
+  // com o texto de Estilos preenchido ele ja carrega o estilo: o genero do
+  // botao nao entra no prompt (prioridade do texto).
+  if (options.genreLabel && !options.styleFromText) parts.push(`genre: ${options.genreLabel}`);
   if (options.moodLabel) parts.push(`mood: ${options.moodLabel}`);
   if (options.instrumental) parts.push('instrumental, no vocals');
   if (options.lyrics) parts.push(`lyrics:\n${options.lyrics}`);

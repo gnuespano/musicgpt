@@ -136,6 +136,7 @@ musicgpt/
 │   ├── lib/cdp.mjs             # cliente CDP compartilhado pelos testes
 │   ├── provar-acestep.mjs      # sonda: o que a API do ACE-Step devolve
 │   ├── testar-audio-referencia.mjs  # teste do upload do áudio de referência
+│   ├── testar-estilo-prioridade.mjs # teste da prioridade do texto de Estilos
 │   ├── testar-espectro.mjs     # teste do visualizador (Chromium headless + CDP)
 │   └── testar-download.mjs     # teste do download (disco efemero, MP3/WAV)
 └── data/                   # library.json, playlists.json, profile.json, tracks/
@@ -183,6 +184,7 @@ Cada faixa guarda os metadados: BPM, tom, estrutura, progressão, vozes cantadas
 - **Variedade** (0–100) altera o arranjo no motor: densidade do arpejo, repetição da melodia, inversões de acorde e fills de bateria. 0 = parado e repetitivo, 100 = mais disperso (medido: 33% de diferença na forma de onda entre os extremos).
 - **+ Voz** abre o seletor: **Automático** (IA se houver chave), **Voz por IA (OpenRouter)** ou **Voz procedural (local)**, com 10 vozes (alloy, coral, onyx, ash, echo, fable, shimmer, nova, sage, verse).
 - **Áudio ref.** anexa um arquivo de áudio para a geração seguir o estilo/timbre dele (ver 4.0.1). O nome do arquivo aparece logo abaixo do campo de ideia, com botão para remover.
+- **Prioridade do estilo**: o **texto do campo "Estilos" manda sempre**. Quando ele está preenchido, os botões de gênero (Pop, MPB, …) são **ignorados** — ficam esmaecidos, não aceitam clique e o app avisa ("O texto digitado tem prioridade"). Só quando o texto está **vazio** o botão selecionado entra como fallback. A regra é garantida nos dois lados: o front-end manda `style` (o texto) e `genre` vazio, e o servidor ignora o gênero quando recebe o texto (`styleSource: "text"`).
 
 ---
 
@@ -235,7 +237,7 @@ ACESTEP_API_KEY=sk-...
 }
 ```
 
-- **caption**: o prompt de estilo (descrição do app + gênero + clima + lo-fi/instrumental) vai dentro de `<prompt>`.
+- **caption**: o prompt de estilo (descrição do app + gênero + clima + lo-fi/instrumental) vai dentro de `<prompt>`. **Quando o texto do campo "Estilos" está preenchido, ele é a caption**: o gênero do botão não é acrescentado (não aparece `"Pop style"` junto do texto do usuário) — só sem texto o gênero entra como fallback.
 - **letra**: vai dentro de `<lyrics>`. Sem letra do usuário, o pedido usa `sample_mode: true` e o **próprio LM 5Hz escreve a letra** — a letra volta no campo `content` (`## Lyrics`) e é guardada na faixa.
 - **`thinking: true`**: liga o **LM 5Hz**, que gera os códigos semânticos antes do DiT — é o modo de **maior qualidade** (o `thinking: false` faz o DiT rodar em modo text2music, sem os códigos do LM).
 - **`vocal_language`**: vem do idioma do app (`pt`/`en`). Sem isso o LM canta em inglês mesmo com prompt em português (medido: `"Language: en"` → com `pt`, `"Language: pt"` e letra em português).
@@ -335,6 +337,27 @@ Anexe um arquivo de áudio e a música nova nasce **com o estilo do arquivo**: m
 npm run test:referencia              # sobe o próprio servidor (motor local) e confere o fluxo todo
 MUSICGPT_TESTE_LIVE=1 npm run test:referencia   # gera de verdade no ACE-Step com áudio de referência
 ```
+
+### 4.0.2 Prioridade do texto de Estilos sobre os botões de gênero
+
+O **texto** do bloco "Estilos" tem prioridade **absoluta** sobre os botões de gênero (Pop, MPB, …).
+
+| Camada | O que garante |
+|---|---|
+| `public/app.js` | `resolveStyleSelection()`: com texto → `style` = texto e `genre` = vazio; sem texto → `genre` = botão selecionado (fallback). `syncStylePriority()` esmaece os chips e mostra o aviso "O texto digitado tem prioridade" enquanto o texto existe. |
+| `server/api.js` | `POST /api/generate`: quando chega `style` (o texto), o gênero do botão é ignorado (`styleSource: "text"`) e a faixa guarda `style`/`styleLabel`/`tags[0]` = o texto digitado. Sem texto, o gênero manda (`styleSource: "genre"`). |
+| `server/providers/acestep.js` | `buildCaption()`: com o texto, a caption **não** ganha o sufixo do gênero (não aparece `"Pop style"` junto do que o usuário escreveu). Sem texto, o gênero entra como fallback. |
+
+**Teste**
+
+```bash
+npm run test:estilo                  # contrato + HTTP + navegador (Chromium headless, motor local)
+MUSICGPT_TESTE_LIVE=1 npm run test:estilo   # gera de verdade no ACE-Step com áudio de referência
+```
+
+O teste do navegador anexa um áudio de referência, digita `Modern talking, cherry cherry lady` no
+campo de estilo, clica em **Criar** e confere o card: a tag `ref: <arquivo>` aparece, a tag com o
+**texto exato** digitado aparece e o `"Pop"` do botão **não** aparece.
 
 ---
 
@@ -443,7 +466,7 @@ cd musicgpt
 npm install          # só o encoder de MP3
 npm start            # porta 8787 (PORT=xxxx para trocar)
 npm run dev          # com --watch
-npm test             # testes locais (referência + espectro + download) - servidor precisa estar no ar
+npm test             # testes locais (referência + estilo + espectro + download) - servidor precisa estar no ar
 ```
 
 Variáveis úteis: `PORT`, `HOST`, `MUSICGPT_DATA_DIR`, `MUSICGPT_MUSIC_PROVIDER`, `MUSICGPT_LYRICS_PROVIDER`, `MUSICGPT_TTS_PROVIDER`, `ACESTEP_API_KEY`, `ACESTEP_BASE_URL`, `ACESTEP_MODEL`, `ACESTEP_THINKING`, `ACESTEP_VOCAL_LANGUAGE`, `ACESTEP_DURATION_FACTOR`, `ACESTEP_REFERENCE_STRENGTH`, `ACESTEP_TIMEOUT_MS`, `MUSICGPT_MAX_REFERENCE_BYTES`, `REPLICATE_API_TOKEN`, `FAL_KEY`, `OPENAI_API_KEY`, `OPENROUTER_API_KEY`, `MUSICGPT_SSL_CERT`, `MUSICGPT_SSL_KEY`.

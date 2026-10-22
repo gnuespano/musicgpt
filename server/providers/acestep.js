@@ -68,13 +68,18 @@ const MAX_DURATION = 240;
  * audio_config, entao a dica precisa vir aqui para a faixa ter o tamanho
  * pedido (medido: pedir 30s sem dica -> faixa de 100s; com dica de 69s ->
  * faixa de ~30s).
+ *
+ * PRIORIDADE DO TEXTO: quando o estilo veio do texto digitado pelo usuario
+ * (`styleFromText`), esse texto JA esta no caption (o prompt) - o genero do
+ * botao nao e acrescentado, para nao aparecer "Pop style" junto do texto
+ * que o usuario escreveu.
  */
-export function buildCaption({ prompt, style, genreLabel, moodLabel, lofi, instrumental, duration }) {
+export function buildCaption({ prompt, style, styleFromText = false, genreLabel, moodLabel, lofi, instrumental, duration }) {
   const bits = [];
   const text = String(prompt || '').trim();
   if (text) bits.push(text);
 
-  const genre = style || genreLabel;
+  const genre = styleFromText ? '' : (style || genreLabel);
   if (genre) bits.push(`${genre} style`);
 
   const mood = moodLabel;
@@ -90,19 +95,31 @@ export function buildCaption({ prompt, style, genreLabel, moodLabel, lofi, instr
   return bits.join(', ') || 'instrumental track';
 }
 
+/**
+ * Tempo PLANEJADO (ja compensado pelo fator do host) para uma duracao
+ * pedida pelo usuario.
+ */
+export function plannedDuration(duration) {
+  const value = Number(duration);
+  if (!Number.isFinite(value) || value <= 0) return null;
+  return Math.min(MAX_DURATION, Math.max(MIN_DURATION, Math.round(value * (ACESTEP.durationFactor || 1))));
+}
+
 /** Monta o corpo da requisicao no formato da API do ACE-Step. */
-export function buildRequestBody({ prompt, lyrics, style, options = {} }) {
+export function buildRequestBody({ prompt, lyrics, style, styleFromText = false, options = {} }) {
   const duration = Number(options.duration);
   // o endpoint entrega ~43% do tempo planejado e tem teto de ~100s
   // (medido: 30->13s, 60->26s, 120->51s, 240->102s). Pedimos um pouco mais
   // que o alvo para a faixa final ter o tamanho desejado.
-  const planned = Number.isFinite(duration) && duration > 0
-    ? Math.min(MAX_DURATION, Math.max(MIN_DURATION, Math.round(duration * (ACESTEP.durationFactor || 1))))
-    : null;
+  const planned = plannedDuration(duration);
+
+  // o texto digitado pelo usuario tem prioridade sobre o genero do botao
+  const fromText = Boolean(styleFromText || options.styleFromText);
 
   const caption = buildCaption({
     prompt,
     style,
+    styleFromText: fromText,
     genreLabel: options.genreLabel,
     moodLabel: options.moodLabel,
     lofi: options.lofi,
@@ -390,9 +407,9 @@ async function computeAudioPeaks(buffer, format) {
  *
  * @param {string} prompt  descricao do estilo (caption)
  * @param {string} lyrics  letra (vazio = o modelo escreve a letra)
- * @param {string} style   genero/estilo (ex.: "MPB")
+ * @param {string} style   estilo efetivo (texto digitado ou genero do botao)
  * @param {object} options { duration, instrumental, genreLabel, moodLabel, lofi,
- *                           trackId, onProgress, referenceAudio }
+ *                           trackId, onProgress, referenceAudio, styleFromText }
  * @returns {Promise<{buffer: Buffer, format: string, duration: number|null,
  *                    file: string, path: string, meta: object}>}
  */
@@ -403,7 +420,9 @@ export async function generateAceMusic(prompt, lyrics, style, options = {}) {
 
   const onProgress = options.onProgress || (() => {});
   const reference = options.referenceAudio || null;
-  const body = buildRequestBody({ prompt, lyrics, style, options });
+  // o texto digitado pelo usuario tem prioridade sobre o genero do botao
+  const styleFromText = Boolean(options.styleFromText);
+  const body = buildRequestBody({ prompt, lyrics, style, styleFromText, options });
 
   onProgress({
     stage: 'enviando ao ACE-Step',
@@ -432,6 +451,7 @@ export async function generateAceMusic(prompt, lyrics, style, options = {}) {
       prompt,
       lyrics,
       style,
+      styleFromText,
       options: { ...options, referenceAudio: null },
     });
     payload = await callApi(semReferencia);
@@ -470,7 +490,16 @@ export async function generateAceMusic(prompt, lyrics, style, options = {}) {
   meta.model = payload?.model || body.model || ACESTEP.model || 'acestep';
   meta.thinking = Boolean(body.thinking);
   meta.sampleMode = Boolean(body.sample_mode);
-  meta.caption = meta.caption || buildCaption({ prompt, style, options });
+  meta.caption = meta.caption || buildCaption({
+    prompt,
+    style,
+    styleFromText,
+    genreLabel: options.genreLabel,
+    moodLabel: options.moodLabel,
+    lofi: options.lofi,
+    instrumental: options.instrumental,
+    duration: plannedDuration(options.duration),
+  });
   meta.requestId = payload?.id || null;
   // audio de referencia: guarda de onde veio o estilo (sem o audio em si).
   // `used: false` significa que a API recusou o arquivo e a faixa foi gerada

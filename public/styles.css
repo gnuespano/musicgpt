@@ -209,6 +209,22 @@ input[type="range"]::-moz-range-thumb { width: 15px; height: 15px; border: 2px s
 .chip:hover { color: var(--text); border-color: #3a3a52; }
 .chip.is-on { background: rgba(124, 92, 255, .18); border-color: rgba(124, 92, 255, .55); color: #fff; }
 
+/* Prioridade do texto do campo "Estilos": com ele preenchido, os botoes de
+   genero ficam esmaecidos e nao aceitam clique (nao vao para o pedido). */
+.chips.is-overridden .chip {
+  opacity: .38;
+  cursor: not-allowed;
+  pointer-events: none;
+  filter: grayscale(.7);
+}
+.style-hint {
+  display: block;
+  margin: 6px 0 0;
+  color: var(--brand);
+  opacity: .85;
+}
+.style-hint[hidden] { display: none; }
+
 .switch { display: flex; align-items: center; gap: 10px; margin: 16px 0 6px; cursor: pointer; }
 .switch input { display: none; }
 .switch-track { width: 40px; height: 22px; border-radius: 999px; background: #26263a; position: relative; transition: .18s ease; flex: none; }

@@ -171,11 +171,14 @@ async function executeJob(job, options, referenceAudio = null) {
       // OpenRouter (nem de rede extra).
       lyricsEngine = options.instrumental ? null : (lyrics ? 'user' : 'acestep-lm');
     } else if (!options.instrumental && !lyrics) {
+      // com o texto de Estilos preenchido o prompt JA e o estilo: nao
+      // repetimos o texto no campo "genero" do gerador de letras.
+      const styleForLyrics = options.styleFromText ? '' : options.style;
       try {
         const res = await generateLyricsWithProvider({
           prompt: options.prompt,
           lang: options.lang,
-          style: options.style,
+          style: styleForLyrics,
           seed: options.seed,
         }, mainLyricsProvider());
         lyrics = res.text;
@@ -185,7 +188,7 @@ async function executeJob(job, options, referenceAudio = null) {
         const local = generateLocalLyrics({
           prompt: options.prompt,
           lang: options.lang,
-          style: options.style,
+          style: styleForLyrics,
           seed: options.seed,
         });
         lyrics = local.text;
@@ -230,7 +233,7 @@ async function executeJob(job, options, referenceAudio = null) {
           const local = generateLocalLyrics({
             prompt: options.prompt,
             lang: options.lang,
-            style: options.style,
+            style: options.styleFromText ? '' : options.style,
             seed: options.seed,
           });
           lyrics = local.text;
@@ -310,7 +313,10 @@ async function executeJob(job, options, referenceAudio = null) {
       genreLabel: options.genreLabel,
       mood: options.mood,
       moodLabel: options.moodLabel,
+      // estilo usado na geracao (texto digitado > botao de genero)
       style: options.style,
+      styleLabel: options.styleLabel,
+      styleSource: options.styleSource,
       instrumental: Boolean(options.instrumental),
       lyrics: finalLyrics,
       lyricsEngine: lyricsEngine || result.meta?.lyricsEngine || null,
@@ -337,7 +343,8 @@ async function executeJob(job, options, referenceAudio = null) {
       sourceUrl: result.sourceUrl || result.meta?.sourceUrl || null,
       sourceFormat: result.sourceFormat || result.meta?.sourceFormat || format,
       peaks: result.peaks || [],
-      tags: [options.genreLabel, options.moodLabel, options.lofi ? 'chuva' : null].filter(Boolean),
+      // a primeira tag e o estilo usado (texto digitado quando existe)
+      tags: [options.styleLabel, options.moodLabel, options.lofi ? 'chuva' : null].filter(Boolean),
       createdAt: now,
       plays: 0,
       likes: 0,
@@ -426,10 +433,26 @@ export const handlers = {
     if (!prompt && !body.lyrics) {
       return json(res, 400, { error: 'Descreva a musica que voce quer criar.' });
     }
-    // quando o cliente nao informa um genero/clima explicito, detectamos pelo prompt
-    const genreKey = body.genre && GENRES[body.genre] ? body.genre : detectGenre(prompt);
+
+    /**
+     * PRIORIDADE ABSOLUTA DO TEXTO DO CAMPO "ESTILOS".
+     *
+     * Quando o cliente envia o texto digitado (`style`), ele manda: o genero
+     * dos botoes (Pop, MPB, ...) e completamente ignorado - nem no estilo,
+     * nem na caption que vai para a API do ACE-Step, nem nas tags da faixa.
+     * Sem o texto, o genero do botao (ou o detectado pelo prompt) manda.
+     */
+    const styleText = String(body.style || '').trim();
+    const styleFromText = Boolean(styleText);
+
+    // com o texto preenchido o genero tambem vem do texto (botao ignorado);
+    // sem texto, vale o botao selecionado e, na falta dele, a deteccao.
+    const genreKey = styleFromText
+      ? detectGenre(prompt)
+      : (body.genre && GENRES[body.genre] ? body.genre : detectGenre(prompt));
     const genre = GENRES[genreKey];
     const moodKey = body.mood && MOODS[body.mood] ? body.mood : detectMood(prompt);
+    const effectiveStyle = styleFromText ? styleText : genre.label;
     const options = {
       prompt,
       title: body.title,
@@ -437,7 +460,12 @@ export const handlers = {
       genreLabel: genre.label,
       mood: moodKey,
       moodLabel: moodKey,
-      style: body.style || genre.label,
+      // estilo que vai para o motor de musica (caption do ACE-Step)
+      style: effectiveStyle,
+      // rotulo exibido no card da faixa (o texto digitado, quando existe)
+      styleLabel: effectiveStyle,
+      styleSource: styleFromText ? 'text' : 'genre',
+      styleFromText,
       instrumental: asBool(body.instrumental),
       duration: Math.min(MAX_DURATION_SEC, Math.max(20, Number(body.duration) || 75)),
       voiceStyle: VOICE_STYLES[body.voiceStyle] ? body.voiceStyle : genre.vocal,
