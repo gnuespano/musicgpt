@@ -49,7 +49,7 @@ O player tem uma **faixa de barras** no topo que reage à frequência da música
 - **Responsivo**: o buffer do canvas é recalculado no `resize`/`orientationchange` e por `ResizeObserver`, respeitando o `devicePixelRatio` (limitado a 2× para não pesar no celular). A faixa encolhe no mobile (`--spectrum-h`) e o player ganha altura (`--player-h`) para acomodá-la sem empurrar o conteúdo.
 - **Fallback**: sem Web Audio API (ou se o navegador bloquear o `AudioContext`), o app continua tocando normalmente — só não há visualização.
 
-Teste automatizado (Chromium headless via CDP, 21 verificações):
+Teste automatizado (Chromium headless via CDP; a suíte completa soma **185 verificações**):
 
 ```bash
 npm test              # precisa do servidor no ar (npm start)
@@ -171,8 +171,8 @@ Cada faixa guarda os metadados: BPM, tom, estrutura, progressão, vozes cantadas
 
 ```
 [ Áudio ref. ]   [ + Voz ]
-┌ Letra        ✨ [✦] ┐   varinha = sorteia um tema aleatório
-│  textarea           │   [✦] IA = gera a letra com IA
+┌ Letra        ✨ [✦] ┐   varinha = gera a letra a partir do tema do campo
+│  textarea           │   [✦] IA = gera a letra a partir do texto de Estilos
 │  toggle "Instrumental" dentro do bloco
 └─────────────────────────┘
 ┌ Estilos          ✨ ┐   varinha = sorteia uma descrição de estilo aleatória
@@ -449,29 +449,62 @@ O teste do navegador anexa um áudio de referência, digita `Modern talking, che
 campo de estilo, clica em **Criar** e confere o card: a tag `ref: <arquivo>` aparece, a tag com o
 **texto exato** digitado aparece e o `"Pop"` do botão **não** aparece.
 
-### 4.0.4 Varinha mágica: sorteia estilo e tema (offline)
+### 4.0.4 Varinha mágica: sorteia estilo e **gera** letra
 
-Os dois blocos da tela "Criar" têm uma varinha (✨) que **sorteia** um item de uma lista local e escreve no campo:
+Os dois blocos da tela "Criar" têm uma varinha (✨):
 
 | Bloco | Botão | O que faz |
 |---|---|---|
-| **Estilos** | `#btnStyleWand` | Sorteia uma das **22 descrições de estilo** (`STYLE_SUGGESTIONS`) e preenche o campo de ideia. Como o texto passa a existir, `syncStylePriority()` entra em ação: os chips de gênero ficam esmaecidos e o aviso "O texto digitado tem prioridade" aparece (ver 4.0.3). |
-| **Letra** | `#btnLyricWand` | Sorteia um dos **22 temas de letra** (`LYRIC_THEMES`, ex.: "Uma música sobre um amor perdido no verão") e escreve no campo, que aceita sugestão (o placeholder já diz "ou uma sugestão"). O bloco é reaberto automaticamente. |
-| **Letra** | `#btnLyricAI` (✦) | **Não** sorteia: é o caminho antigo da varinha, que chama `POST /api/lyrics` e escreve a letra de verdade (IA se houver chave, senão o gerador local offline). |
+| **Estilos** | `#btnStyleWand` | Sorteia uma das **22 descrições de estilo** (`STYLE_SUGGESTIONS`) e preenche o campo de ideia (offline, sem request). Como o texto passa a existir, `syncStylePriority()` entra em ação: os chips de gênero ficam esmaecidos e o aviso "O texto digitado tem prioridade" aparece (ver 4.0.3). |
+| **Letra** | `#btnLyricWand` | Lê o **texto atual do campo** (o tema) e chama `POST /api/lyrics` para **gerar a letra completa**. Sem texto no campo, ela sorteia um dos **22 temas** (`LYRIC_THEMES`) e gera a partir dele. O bloco é reaberto e o campo ganha o efeito `is-magic`. |
+| **Letra** | `#btnLyricAI` (✦) | Mesma geração, mas usa o **texto de Estilos** como ideia (caminho antigo da varinha, agora compartilhando o helper `gerarLetra()`). |
 
-Regras do sorteio (`public/app.js`):
+Regras do sorteio de estilo (`public/app.js`):
 
-- **Zero rede.** As listas vivem no front-end; nenhum request é feito. É por isso que funciona offline e não gasta cota de API.
+- **Zero rede.** A lista de estilos vive no front-end; nenhum request é feito. É por isso que funciona offline e não gasta cota de API.
 - **Sem repetição.** `pickRandom(lista, valorAtual)` remove o valor que já está no campo antes de sortear — dois cliques seguidos **nunca** devolvem a mesma sugestão (verificado no teste).
+
+Regras da geração de letra (as duas, em `gerarLetra()`):
+
+- **Seed nova por clique.** O gerador local deriva a seed do `hash(prompt)`; sem seed explícita, o **mesmo tema devolveria sempre a mesma letra**. Por isso o front manda `seed: Math.floor(Math.random() * 2**31)` a cada clique — mesma seed ainda dá a mesma letra (determinismo preservado).
+- **Estilo junto.** O texto de Estilos vai como `style`, então o gerador sabe o gênero ("Genero: …") sem precisar adivinhar.
+- **Nunca quebra.** Se o provider de IA falhar, o backend cai no gerador local offline (ver 4.1).
 - **Efeito visual.** `magicEffect(campo, botão)` adiciona a classe `is-magic`: `@keyframes magicGlow` (brilho roxo + fade no textarea) e `@keyframes magicSpin` (sacudida no botão). A classe sai no `animationend` (ou após 1,2 s), então o efeito se repete em cliques seguidos. Com `prefers-reduced-motion: reduce` a animação vira um anel fixo.
 
 **Teste**
 
 ```bash
-npm run test:varinha                # navegador headless (Chromium), motor local, 19 verificações
+npm run test:varinha                # navegador headless (Chromium), motor local, 21 verificações
 ```
 
-O teste confere as duas listas (≥ 15 itens cada), que o clique preenche o campo com um item **da lista**, que a animação `is-magic` dispara no campo e no botão, que os chips de gênero ficam desativados (prioridade do texto), que dois cliques seguidos mudam a sugestão, que o bloco "Letra" é reaberto, que o botão **IA** continua gerando letra de verdade e que o layout **mobile** (390 px) segue sem overflow.
+O teste confere as duas listas (≥ 15 itens cada), que a varinha de **Estilos** preenche o campo com um item **da lista** sem repetir, que a animação `is-magic` dispara no campo e no botão, que os chips de gênero ficam desativados (prioridade do texto), que a varinha de **Letra** **gera** letra completa (com tags de seção) a partir do tema digitado — e que dois cliques com o mesmo tema dão letras diferentes —, que o bloco "Letra" é reaberto, que o botão **IA** continua gerando letra e que o layout **mobile** (390 px) segue sem overflow.
+
+---
+
+### 4.0.5 Tema no campo "Letra" vira letra completa antes de virar áudio
+
+O campo "Letra" aceita as duas coisas — a própria letra **ou** uma sugestão/tema (o placeholder diz "Escreva a letra de uma música **ou uma sugestão**", e a varinha escreve exatamente um tema ali). Mas **um tema não é uma letra**: era enviado ao motor como se fosse, e o resultado era a mesma frase cantada em todas as frases (medido: **16 frases idênticas** na mesma faixa).
+
+A correção fica em `server/lyrics.js` + `server/api.js`:
+
+| Camada | O que faz |
+|---|---|
+| `server/lyrics.js` | `isCompleteLyric(texto)` separa **letra** de **tema**: 2+ tags de seção, ou 1 tag com conteúdo, ou 4+ linhas sem tag ⇒ letra; 1–3 linhas sem tag ⇒ tema. `lyricTheme(texto)` devolve o tema (ou vazio se já for letra). |
+| `server/api.js` (`executeJob`) | Antes de chamar o motor, `lyricTheme(lyrics)` detecta o caso e **expande o tema em letra completa** via `generateLyricsWithProvider()` (IA quando há chave, senão gerador local). O tema original fica guardado em `track.lyricsTheme` e `track.lyricsExpanded: true`, e um warning "Tema expandido em letra completa." vai junto (a UI mostra em **info**, não como erro). |
+
+Garantias (todas verificadas pelo teste):
+
+- Tema ⇒ letra completa com tags e **vocais cantando linhas diferentes**.
+- **Sem letra** ⇒ o motor continua escrevendo a própria (`acestep-lm` / local), como antes.
+- **Letra completa escrita pelo usuário** ⇒ é respeitada **como está**, nunca reescrita.
+- **Instrumental** ⇒ o tema não vira letra nem gera vocal.
+- Com **ACE-Step** ativo, a letra expandida é a que vai dentro de `<lyrics>` na caption (o `lyricsEngine` do gerador prevalece sobre o `user`).
+
+**Teste**
+
+```bash
+npm run test:letra                  # contrato + HTTP + navegador (Chromium), 37 verificações
+```
 
 ---
 
@@ -479,7 +512,7 @@ O teste confere as duas listas (≥ 15 itens cada), que o clique preenche o camp
 
 O app **não depende** do OpenRouter para gerar música: quem faz isso é o ACE-Step. O OpenRouter continua disponível em dois pontos:
 
-1. **Botão ✦ "IA" do bloco Letra** (`POST /api/lyrics`, id `#btnLyricAI`) — usa `openai/gpt-4o-mini` quando há chave. (A varinha ✨ do mesmo bloco **não** usa IA: ela só sorteia um tema.)
+1. **Varinha ✨ e botão ✦ do bloco Letra** (`POST /api/lyrics`, ids `#btnLyricWand` e `#btnLyricAI`) — usam `openai/gpt-4o-mini` quando há chave. A varinha manda o **tema do campo**, o ✦ manda o **texto de Estilos**; ambos enviam uma seed nova por clique (senão o gerador local devolveria sempre a mesma letra). Se a chamada falhar (sem chave, sem crédito 402, sem rede), a própria rota **cai no gerador local offline** e devolve 200 — nunca 502.
 2. **TTS** — só no motor local e **apenas** se você escolher "Voz por IA (OpenRouter)" na interface (ou `MUSICGPT_TTS_PROVIDER=openrouter`).
 
 Quando a chave está em `.env`:
@@ -580,7 +613,7 @@ cd musicgpt
 npm install          # só o encoder de MP3
 npm start            # porta 8787 (PORT=xxxx para trocar)
 npm run dev          # com --watch
-npm test             # testes locais (referência + estilo + varinha + modo do áudio + espectro + download) - servidor precisa estar no ar
+npm test             # testes locais (referência + estilo + varinha + letra + modo do áudio + espectro + download) - servidor precisa estar no ar
 ```
 
 Variáveis úteis: `PORT`, `HOST`, `MUSICGPT_DATA_DIR`, `MUSICGPT_MUSIC_PROVIDER`, `MUSICGPT_LYRICS_PROVIDER`, `MUSICGPT_TTS_PROVIDER`, `ACESTEP_API_KEY`, `ACESTEP_BASE_URL`, `ACESTEP_MODEL`, `ACESTEP_THINKING`, `ACESTEP_VOCAL_LANGUAGE`, `ACESTEP_DURATION_FACTOR`, `ACESTEP_REFERENCE_STRENGTH`, `ACESTEP_TIMEOUT_MS`, `MUSICGPT_MAX_REFERENCE_BYTES`, `REPLICATE_API_TOKEN`, `FAL_KEY`, `OPENAI_API_KEY`, `OPENROUTER_API_KEY`, `MUSICGPT_SSL_CERT`, `MUSICGPT_SSL_KEY`.

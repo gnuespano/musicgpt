@@ -7,10 +7,11 @@
   "scripts": {
     "start": "node server/index.js",
     "dev": "node --watch server/index.js",
-    "test": "npm run test:referencia && npm run test:estilo && npm run test:varinha && npm run test:modo && npm run test:espectro && npm run test:download",
+    "test": "npm run test:referencia && npm run test:estilo && npm run test:varinha && npm run test:letra && npm run test:modo && npm run test:espectro && npm run test:download",
     "test:referencia": "node scripts/testar-audio-referencia.mjs",
     "test:estilo": "node scripts/testar-estilo-prioridade.mjs",
     "test:varinha": "node scripts/testar-varinha.mjs",
+    "test:letra": "node scripts/testar-letra-tema.mjs",
     "test:modo": "node scripts/testar-modo-audio.mjs",
     "test:fidelidade": "node scripts/testar-fidelidade.mjs",
     "test:espectro": "node scripts/testar-espectro.mjs",

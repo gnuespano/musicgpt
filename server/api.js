@@ -18,7 +18,7 @@ import {
 import { generateLyricsWithProvider } from './providers/lyrics.js';
 import { generateMusic } from './providers/music.js';
 import { aceStepStatus, normalizeAudioMode } from './providers/acestep.js';
-import { generateLyrics as generateLocalLyrics } from './lyrics.js';
+import { generateLyrics as generateLocalLyrics, lyricTheme } from './lyrics.js';
 import { voiceOver, resolveTtsVoice } from './audio/voice.js';
 import { detectGenre, detectMood, MAX_DURATION_SEC } from './audio/render.js';
 import { encodeMp3, mp3Available } from './audio/mp3.js';
@@ -165,11 +165,57 @@ async function executeJob(job, options, referenceAudio = null) {
       emit({ detail: warnings[warnings.length - 1] });
     }
 
+    /**
+     * TEMA NO CAMPO DE LETRA -> LETRA COMPLETA.
+     *
+     * O campo "Letra" aceita um tema curto ("Uma musica sobre aceitar que o
+     * fim ja chegou"), mas esse texto NAO e uma letra: enviado como esta, o
+     * motor cantava a mesma frase repetida em todas as frases (16x na mesma
+     * faixa). Aqui o tema vira letra completa ANTES de chegar ao motor, com a
+     * IA (OpenRouter quando ha chave) e fallback no gerador local.
+     */
+    const theme = options.instrumental ? '' : lyricTheme(lyrics);
+    if (theme) {
+      emit({ detail: 'transformando o tema em letra completa' });
+      // com o texto de Estilos preenchido ele JA e o estilo: nao repetimos no
+      // campo "genero" do gerador de letras
+      const styleForLyrics = options.styleFromText ? '' : options.style;
+      try {
+        const res = await generateLyricsWithProvider({
+          prompt: theme,
+          lang: options.lang,
+          style: styleForLyrics,
+          seed: options.seed,
+        }, mainLyricsProvider());
+        lyrics = res.text;
+        lyricsEngine = res.engine;
+      } catch (err) {
+        // fallback: gerador local de letras (offline)
+        const local = generateLocalLyrics({
+          prompt: theme,
+          lang: options.lang,
+          style: styleForLyrics,
+          seed: options.seed,
+        });
+        lyrics = local.text;
+        lyricsEngine = 'local-templates';
+        // so a 1a linha, e curta: o toast nao aguenta a resposta inteira da API
+        const motivo = `${err.message}`.split('\n')[0].slice(0, 120);
+        warnings.push(`Letra via IA indisponível (${motivo}). Usado o gerador local.`);
+        emit({ detail: warnings[warnings.length - 1] });
+      }
+      warnings.push('Tema expandido em letra completa.');
+      emit({ detail: warnings[warnings.length - 1] });
+    }
+    // tema original digitado pelo usuario (quando ele virou letra completa)
+    const lyricsTheme = theme || null;
+    const lyricsExpanded = Boolean(theme);
     if (provider === 'acestep') {
       // O ACE-Step gera a musica E o vocal (com a letra). Quando o usuario
       // nao manda uma letra, o proprio LM 5Hz escreve uma - sem depender do
-      // OpenRouter (nem de rede extra).
-      lyricsEngine = options.instrumental ? null : (lyrics ? 'user' : 'acestep-lm');
+      // OpenRouter (nem de rede extra). Se o tema ja virou letra, o engine
+      // ve do gerador usado (acima).
+      lyricsEngine = options.instrumental ? null : (lyricsEngine || (lyrics ? 'user' : 'acestep-lm'));
     } else if (!options.instrumental && !lyrics) {
       // com o texto de Estilos preenchido o prompt JA e o estilo: nao
       // repetimos o texto no campo "genero" do gerador de letras.
@@ -193,7 +239,9 @@ async function executeJob(job, options, referenceAudio = null) {
         });
         lyrics = local.text;
         lyricsEngine = 'local-templates';
-        warnings.push(`Letra via IA indisponível (${err.message}). Usado o gerador local.`);
+        // so a 1a linha, e curta: o toast nao aguenta a resposta inteira da API
+        const motivo = `${err.message}`.split('\n')[0].slice(0, 120);
+        warnings.push(`Letra via IA indisponível (${motivo}). Usado o gerador local.`);
         emit({ detail: warnings[warnings.length - 1] });
       }
     }
@@ -320,6 +368,9 @@ async function executeJob(job, options, referenceAudio = null) {
       instrumental: Boolean(options.instrumental),
       lyrics: finalLyrics,
       lyricsEngine: lyricsEngine || result.meta?.lyricsEngine || null,
+      // tema digitado no campo "Letra" que virou letra completa (Bug 2)
+      lyricsTheme,
+      lyricsExpanded,
       duration: Math.round(duration * 100) / 100,
       bpm: result.meta?.bpm ?? GENRES[options.genre]?.bpm ?? null,
       key: result.meta?.key ?? null,
@@ -561,26 +612,57 @@ export const handlers = {
     });
   },
 
+  /**
+   * GERA LETRA A PARTIR DE UM TEMA.
+   *
+   * A varinha do bloco "Letra" manda aqui o texto do campo (o tema) e
+   * recebe uma letra completa de volta.
+   *
+   * `seed` opcional: sem ela o gerador local deriva a seed do hash do
+   * prompt, entao o MESMO tema devolveria SEMPRE a mesma letra (o Bug 1 da
+   * varinha). O cliente manda uma seed nova por clique; aqui ela so passa
+   * adiante.
+   *
+   * Se o provider de IA falhar, o gerador local offline assume - a rota
+   * nunca responde 502 so por causa de rede/chave.
+   */
   async lyrics(req, res) {
     const body = await readJson(req);
     const prompt = String(body.prompt || '').trim();
     if (!prompt) return json(res, 400, { error: 'Informe o tema da letra.' });
+
+    const opts = {
+      prompt,
+      lang: body.lang === 'en' ? 'en' : 'pt',
+      style: body.style,
+      mode: body.mode === 'next' ? 'next' : 'full',
+      context: Array.isArray(body.context) ? body.context : [],
+      // so numero vira seed; null/vazio/lixo caem em undefined (hash do
+      // prompt) - Number(null) e 0, entao nao da para confiar em Number()
+      seed: body.seed === null || body.seed === undefined || body.seed === ''
+        ? undefined
+        : Number(body.seed),
+    };
+    if (!Number.isFinite(opts.seed)) opts.seed = undefined;
+
     try {
-      const result = await generateLyricsWithProvider({
-        prompt,
-        lang: body.lang === 'en' ? 'en' : 'pt',
-        style: body.style,
-        mode: body.mode === 'next' ? 'next' : 'full',
-        context: Array.isArray(body.context) ? body.context : [],
-        seed: body.seed,
-      });
-      if (body.mode === 'next') {
+      const result = await generateLyricsWithProvider(opts);
+      if (opts.mode === 'next') {
         const line = result.line || result.text || '';
         return json(res, 200, { line, theme: result.theme, engine: result.engine });
       }
       return json(res, 200, result);
     } catch (error) {
-      return json(res, 502, { error: `Falha ao gerar letra: ${error.message}` });
+      // fallback offline: o app nunca quebra por falta de chave/rede
+      try {
+        const local = generateLocalLyrics(opts);
+        if (opts.mode === 'next') {
+          return json(res, 200, { line: local.line, theme: local.theme, engine: 'local-templates' });
+        }
+        return json(res, 200, { ...local, engine: 'local-templates' });
+      } catch (localError) {
+        return json(res, 502, { error: `Falha ao gerar letra: ${localError.message}` });
+      }
     }
   },
 

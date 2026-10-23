@@ -591,7 +591,13 @@ function watchJob(jobId, btn) {
           ${track.voiceInfo?.engine === 'acestep' ? '<span class="tag">voz ACE-Step</span>' : ''}
         </div>`;
       if (Array.isArray(track.warnings) && track.warnings.length) {
-        toast(track.warnings[0], 'error');
+        // "Tema expandido..." e comportamento esperado (o tema virou letra):
+        // avisa em info. O resto (IA fora do ar, provider caindo no local)
+        // continua como erro.
+        const info = track.warnings.filter((w) => /^Tema expandido/i.test(w));
+        const erros = track.warnings.filter((w) => !/^Tema expandido/i.test(w));
+        info.forEach((w) => toast(w, 'info'));
+        if (erros.length) toast(erros[0], 'error');
       }
       $('#btnPlayDone').onclick = () => playTrack(track);
       // download do audio gerado: a rota /api/download resolve a fonte
@@ -1531,18 +1537,51 @@ function bind() {
     toast('Geração cancelada.', 'info');
   });
 
-  // varinha da letra: sorteia um tema aleatorio para o campo "Letra"
-  $('#btnLyricWand').addEventListener('click', () => {
+  // seed nova por clique: sem ela o gerador local deriva a seed do hash do
+  // prompt e o MESMO tema devolve SEMPRE a mesma letra (Bug 1)
+  const novaSeed = () => Math.floor(Math.random() * 2 ** 31);
+
+  /**
+   * Gerador da letra usado pelos dois botoes do bloco.
+   *
+   * `tema` e o texto que vira semente da letra (o proprio campo "Letra", ou
+   * o texto de Estilos no botao "IA"). O backend escreve a letra completa -
+   * com IA quando ha chave, senao com o gerador local - e devolve o texto.
+   */
+  async function gerarLetra({ tema, btn }) {
+    btn.classList.add('is-busy');
+    try {
+      const res = await api('/api/lyrics', {
+        method: 'POST',
+        body: { prompt: tema, style: $('#prompt').value.trim(), mode: 'full', seed: novaSeed() },
+      });
+      const texto = String(res.text || '').trim();
+      if (!texto) throw new Error('a IA não devolveu letra.');
+      $('#customLyrics').value = texto;
+      expandBlock('lyrics');
+      magicEffect($('#customLyrics'), btn);
+      toast(`Letra criada a partir do tema (${res.engine || 'IA'}).`, 'ok');
+      return texto;
+    } finally {
+      btn.classList.remove('is-busy');
+    }
+  }
+
+  // varinha da letra: usa o TEXTO DO CAMPO como tema e pede a letra ao backend
+  $('#btnLyricWand').addEventListener('click', async () => {
     const campo = $('#customLyrics');
-    const tema = pickRandom(LYRIC_THEMES, campo.value.trim());
+    const btn = $('#btnLyricWand');
+    // com texto no campo ele e o tema; vazio, a varinha sorteia um tema antes
+    const tema = campo.value.trim() || pickRandom(LYRIC_THEMES);
     if (!tema) return;
-    campo.value = tema;
-    expandBlock('lyrics');
-    magicEffect(campo, $('#btnLyricWand'));
-    toast('Tema sorteado — escreva a letra a partir dele.', 'ok');
+    try {
+      await gerarLetra({ tema, btn });
+    } catch (err) {
+      toast(err.message, 'error');
+    }
   });
 
-  // "IA" no bloco da letra: gera a letra de verdade (mesmo caminho de antes)
+  // "IA" no bloco da letra: gera a partir do texto de Estilos (mesmo caminho)
   $('#btnLyricAI').addEventListener('click', async () => {
     const prompt = $('#prompt').value.trim() || $('#lyricsPrompt').value.trim();
     if (!prompt) {
@@ -1550,17 +1589,10 @@ function bind() {
       $('#prompt').focus();
       return;
     }
-    const btn = $('#btnLyricAI');
-    btn.classList.add('is-busy');
     try {
-      const res = await api('/api/lyrics', { method: 'POST', body: { prompt, mode: 'full' } });
-      $('#customLyrics').value = res.text;
-      expandBlock('lyrics');
-      toast(`Letra criada (${res.engine || 'IA'}).`, 'ok');
+      await gerarLetra({ tema: prompt, btn: $('#btnLyricAI') });
     } catch (err) {
       toast(err.message, 'error');
-    } finally {
-      btn.classList.remove('is-busy');
     }
   });
 

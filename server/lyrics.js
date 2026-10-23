@@ -259,6 +259,56 @@ const POOLS_EN = {
 
 /* --------- helpers --------- */
 
+/**
+ * Uma linha de secao (tag) de letra: [Verse], [Chorus], [Intro], [Bridge],
+ * [Pre-Chorus], [Outro] e as versoes em portugues ([Verso 1], [Refrão],
+ * [Pré-Refrão], [Ponte], [Saque]) ou com nome livre ([Drop], [Hook]...).
+ */
+const SECTION_TAG_RE = /^\s*\[[^\]\n]{1,40}\]\s*$/;
+
+/**
+ * DISTINGUE LETRA DE TEMA.
+ *
+ * O campo "Letra" aceita as duas coisas (o proprio placeholder diz isso):
+ *   - a LETRA final, ja com tags de secao e varios versos;
+ *   - um TEMA/ideia curta, tipo "Uma musica sobre aceitar que o fim ja chegou".
+ *
+ * O problema: quando so o tema chegava ate o motor, ele era cantado como se
+ * fosse a letra inteira (a MESMA frase repetida em todas as frases). Aqui
+ * detectamos esse caso para a API expandir o tema em letra completa antes de
+ * gerar o audio.
+ *
+ * Regras (uma frase de tema NUNCA passa):
+ *   - 2 ou mais tags de secao                 -> letra;
+ *   - 1 tag com qualquer conteudo junto       -> letra;
+ *   - 4 ou mais linhas sem nenhuma tag        -> letra;
+ *   - 1 a 3 linhas sem tag (frase curta)      -> tema.
+ *
+ * @param {string} text
+ * @returns {boolean}
+ */
+export function isCompleteLyric(text) {
+  const raw = String(text || '');
+  if (!raw.trim()) return false;
+
+  const lines = raw.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  const tags = lines.filter((l) => SECTION_TAG_RE.test(l));
+  const content = lines.filter((l) => !SECTION_TAG_RE.test(l));
+
+  if (tags.length >= 2) return true;
+  if (tags.length >= 1) return content.length >= 1;
+  return content.length >= 4;
+}
+
+/**
+ * Tema (ideia curta) que ainda precisa virar letra, ou vazio quando o texto
+ * ja e uma letra completa (ai ele e respeitado como esta).
+ */
+export function lyricTheme(text) {
+  const raw = String(text || '').trim();
+  return raw && !isCompleteLyric(raw) ? raw : '';
+}
+
 function detectTheme(prompt) {
   const p = String(prompt || '').toLowerCase();
   for (const [name, theme] of Object.entries(THEMES)) {

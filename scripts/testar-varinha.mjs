@@ -163,7 +163,7 @@ try {
     listas.estilos.includes(estilo2), JSON.stringify(estilo2));
 
   /* ---------------------------------------------------------------- *
-   * 3. Varinha de "Letra"
+   * 3. Varinha de "Letra": usa o tema do campo e GERA a letra
    * ---------------------------------------------------------------- */
 
   // colapsa o bloco para provar que a varinha o reabre
@@ -173,27 +173,42 @@ try {
   })`);
   await delay(200);
 
+  // sem texto no campo: a varinha sorteia um tema e gera a letra a partir dele
   await limpaToasts(browser.cdp);
   await realClick(browser.cdp, '#btnLyricWand');
 
-  const tema1 = await browser.cdp.eval(`(() => ({
+  const letra1 = await browser.cdp.eval(`(() => ({
     valor: document.querySelector('#customLyrics').value.trim(),
     aberto: !document.querySelector('#bodyLyrics').closest('.block').classList.contains('is-collapsed'),
   }))`);
-  check('a varinha de Letra preenche o campo com um tema valido',
-    listas.temas.includes(tema1.valor), JSON.stringify(tema1.valor));
-  check('o bloco "Letra" abre quando o tema e sorteado', tema1.aberto);
+  check('a varinha de Letra gera uma letra completa (com tags de secao)',
+    letra1.valor.length > 40 && /\[[A-Za-zÀ-ú]/.test(letra1.valor), `${letra1.valor.slice(0, 60)}...`);
+  check('a letra gerada NAO e um tema da lista (virou letra de verdade)',
+    !listas.temas.includes(letra1.valor), JSON.stringify(letra1.valor.slice(0, 40)));
+  check('o bloco "Letra" abre quando a letra e gerada', letra1.aberto);
   check('o campo de Letra ganha a animacao da varinha (is-magic)',
     (await browser.cdp.eval(`(() => window.__magic.letra)`)));
 
+  // com um tema escrito no campo, a varinha usa ELE como semente
+  const TEMA_DIGITADO = 'Uma música sobre aceitar que o fim já chegou';
+  await browser.cdp.eval(`(() => {
+    const campo = document.querySelector('#customLyrics');
+    campo.value = ${JSON.stringify(TEMA_DIGITADO)};
+    campo.dispatchEvent(new Event('input', { bubbles: true }));
+    return true;
+  })`);
   await limpaToasts(browser.cdp);
   await realClick(browser.cdp, '#btnLyricWand');
-  const tema2 = await browser.cdp.eval(`(() => document.querySelector('#customLyrics').value.trim())`);
-  check('dois cliques seguidos nao repetem o mesmo tema',
-    tema1.valor !== tema2, `${JSON.stringify(tema1.valor)} vs ${JSON.stringify(tema2)}`);
+
+  const letraDoTema = await browser.cdp.eval(`(() => document.querySelector('#customLyrics').value.trim())`);
+  check('a varinha usa o TEMA digitado no campo como semente',
+    letraDoTema !== TEMA_DIGITADO && /\[[A-Za-zÀ-ú]/.test(letraDoTema) && letraDoTema.length > 40,
+    `${letraDoTema.slice(0, 60)}...`);
+  check('dois cliques com o mesmo tema nao repetem a mesma letra',
+    letraDoTema !== letra1.valor, `${JSON.stringify(letra1.valor.slice(0, 30))} vs ${JSON.stringify(letraDoTema.slice(0, 30))}`);
 
   /* ---------------------------------------------------------------- *
-   * 4. O caminho "IA" continua gerando letra
+   * 4. O botao "IA" continua gerando letra a partir de Estilos
    * ---------------------------------------------------------------- */
 
   await realClick(browser.cdp, '#btnLyricAI');
@@ -201,7 +216,7 @@ try {
   let letraIA = '';
   for (let i = 0; i < 40; i += 1) {
     const valor = await browser.cdp.eval(`(() => document.querySelector('#customLyrics').value.trim())`);
-    if (valor && valor !== tema2 && !listas.temas.includes(valor)) { letraIA = valor; break; }
+    if (valor && valor !== letraDoTema) { letraIA = valor; break; }
     await delay(400);
   }
   check('o botao "IA" gera a letra de verdade (motor local)',
