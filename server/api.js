@@ -165,17 +165,32 @@ async function executeJob(job, options, referenceAudio = null) {
       emit({ detail: warnings[warnings.length - 1] });
     }
 
-    /**
-     * TEMA NO CAMPO DE LETRA -> LETRA COMPLETA.
-     *
-     * O campo "Letra" aceita um tema curto ("Uma musica sobre aceitar que o
-     * fim ja chegou"), mas esse texto NAO e uma letra: enviado como esta, o
-     * motor cantava a mesma frase repetida em todas as frases (16x na mesma
-     * faixa). Aqui o tema vira letra completa ANTES de chegar ao motor, com a
-     * IA (OpenRouter quando ha chave) e fallback no gerador local.
-     */
     const theme = options.instrumental ? '' : lyricTheme(lyrics);
-    if (theme) {
+
+    // COVER: o LM do ACE-Step e pulado pela propria API e a melodia
+    // original exige letra pronta - nesse caso o tema continua sendo
+    // expandido aqui (como no caminho local).
+    const coverMode = Boolean(referenceAudio)
+      && normalizeAudioMode(options.audioMode) === 'cover';
+
+    /**
+     * MODO NATURAL LANGUAGE (ACE-Step).
+     *
+     * Com o ACE-Step ativo, o tema (ou o campo vazio) NAO passa pelo
+     * gerador local nem pelo OpenRouter: o texto vira `sample_query` da API
+     * ("natural language description", documentacao do ACE-Step) e o PROPRIO
+     * LM 5Hz expande o tema em caption + letra + metadados antes do DiT.
+     * Excecoes: instrumental (sem vocal) e cover (letra precisa estar pronta).
+     */
+    const naturalLanguage = provider === 'acestep'
+      && !options.instrumental && !coverMode;
+    if (theme && naturalLanguage) {
+      emit({ detail: 'enviando o tema ao ACE-Step (modo Natural Language)' });
+      warnings.push('Tema expandido pelo modelo do ACE-Step (Natural Language).');
+      emit({ detail: warnings[warnings.length - 1] });
+      // o tema NAO vai como <lyrics>: vira sample_query (options.theme)
+      lyrics = '';
+    } else if (theme) {
       emit({ detail: 'transformando o tema em letra completa' });
       // com o texto de Estilos preenchido ele JA e o estilo: nao repetimos no
       // campo "genero" do gerador de letras
@@ -264,7 +279,14 @@ async function executeJob(job, options, referenceAudio = null) {
       });
     } else {
       try {
-        result = await generateMusic({ ...options, lyrics, trackId, referenceAudio }, (p) => {
+        result = await generateMusic({
+          ...options,
+          lyrics,
+          // tema cru para o modo Natural Language do ACE-Step
+          theme: naturalLanguage ? theme : '',
+          trackId,
+          referenceAudio,
+        }, (p) => {
           emit({ stage: p.stage, progress: Math.min(92, 10 + Math.round((p.pct || 0) * 0.82)), detail: p.detail });
         });
         if (!result.peaks) result.peaks = null;
@@ -277,9 +299,10 @@ async function executeJob(job, options, referenceAudio = null) {
           warnings.push('O audio de referencia nao pode ser usado pelo motor local.');
         }
         if (!options.instrumental && !lyrics) {
-          // o motor local precisa de uma letra para cantar
+          // o motor local precisa de uma letra para cantar: aqui (e so
+          // aqui, com o ACE-Step fora) o tema vira letra pelos templates
           const local = generateLocalLyrics({
-            prompt: options.prompt,
+            prompt: theme || options.prompt,
             lang: options.lang,
             style: options.styleFromText ? '' : options.style,
             seed: options.seed,
@@ -349,6 +372,13 @@ async function executeJob(job, options, referenceAudio = null) {
     const finalLyrics = options.instrumental
       ? ''
       : (lyrics || result.meta?.lyrics || '');
+    // modo Natural Language: o ACE-Step expandiu o tema, mas nem sempre
+    // devolve a letra escrita no `content` - avisamos em vez de deixar
+    // a faixa silenciosa sobre o assunto.
+    if (naturalLanguage && theme && !finalLyrics) {
+      warnings.push('O ACE-Step nao devolveu a letra escrita pelo modelo (a musica foi gerada sem ela no card).');
+      emit({ detail: warnings[warnings.length - 1] });
+    }
     const title = (options.title && options.title.trim()) || titleFromPrompt(options.prompt, options.genreLabel);
     const now = Date.now();
     const track = {

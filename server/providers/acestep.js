@@ -162,6 +162,19 @@ export function buildRequestBody({ prompt, lyrics, style, styleFromText = false,
   const cleanLyrics = String(lyrics || '').trim();
   const instrumental = Boolean(options.instrumental);
 
+  /**
+   * MODO NATURAL LANGUAGE (tema curto no campo de letra).
+   *
+   * Um tema ("Uma musica sobre aceitar que o fim ja chegou") NAO e uma
+   * letra: como `<lyrics>` o modelo cantava a mesma frase repetida. Nesse
+   * caso o texto puro vai como `sample_query` - a "natural language
+   * description" da API do ACE-Step - com `sample_mode: true`, e o PROPRIO
+   * LM 5Hz expande o tema em caption + letra + metadados antes do DiT.
+   * So vale sem letra, sem instrumental e sem cover (o LM do cover e pulado
+   * pela API e a melodia original exigiria letra pronta).
+   */
+  const naturalTheme = cleanLyrics ? '' : String(options.theme || '').trim();
+
   const audioConfig = {
     format: ACESTEP.format || 'mp3',
     instrumental,
@@ -227,7 +240,12 @@ export function buildRequestBody({ prompt, lyrics, style, styleFromText = false,
   // sem letra do usuario: o proprio LM escreve a letra (sample mode).
   // No cover nao: a melodia vem do audio de origem e uma letra nova
   // inventada pelo LM brigaria com a estrutura original.
-  if (!cleanLyrics && !instrumental && !isCover) body.sample_mode = true;
+  if (!cleanLyrics && !instrumental && !isCover) {
+    body.sample_mode = true;
+    // Natural Language: o tema vira a descricao em linguagem natural que
+    // guia o LM (caption/letra/metas sao planejados a partir dele).
+    if (naturalTheme) body.sample_query = naturalTheme;
+  }
 
   if (reference) {
     if (isCover) {
@@ -495,7 +513,9 @@ export async function generateAceMusic(prompt, lyrics, style, options = {}) {
       ? (audioMode === AUDIO_MODES.COVER
         ? `cover do audio (${reference.format}, fidelidade ${body.audio_cover_strength})`
         : `estilo a partir do audio (${reference.format})`)
-      : (body.sample_mode ? 'o modelo escreve a letra' : 'letra + estilo'),
+      : (body.sample_query
+        ? `o modelo expande o tema ("${body.sample_query.slice(0, 40)}")`
+        : (body.sample_mode ? 'o modelo escreve a letra' : 'letra + estilo')),
   });
 
   let payload;
@@ -556,6 +576,8 @@ export async function generateAceMusic(prompt, lyrics, style, options = {}) {
   meta.model = payload?.model || body.model || ACESTEP.model || 'acestep';
   meta.thinking = Boolean(body.thinking);
   meta.sampleMode = Boolean(body.sample_mode);
+  // modo Natural Language: o tema foi expandido pelo LM 5Hz (sample_query)
+  meta.sampleQuery = body.sample_query || null;
   meta.caption = meta.caption || buildCaption({
     prompt,
     style,

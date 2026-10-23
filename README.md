@@ -49,7 +49,7 @@ O player tem uma **faixa de barras** no topo que reage à frequência da música
 - **Responsivo**: o buffer do canvas é recalculado no `resize`/`orientationchange` e por `ResizeObserver`, respeitando o `devicePixelRatio` (limitado a 2× para não pesar no celular). A faixa encolhe no mobile (`--spectrum-h`) e o player ganha altura (`--player-h`) para acomodá-la sem empurrar o conteúdo.
 - **Fallback**: sem Web Audio API (ou se o navegador bloquear o `AudioContext`), o app continua tocando normalmente — só não há visualização.
 
-Teste automatizado (Chromium headless via CDP; a suíte completa soma **199 verificações**):
+Teste automatizado (Chromium headless via CDP; a suíte completa soma **223 verificações**):
 
 ```bash
 npm test              # precisa do servidor no ar (npm start)
@@ -243,7 +243,7 @@ ACESTEP_API_KEY=sk-...
 ```
 
 - **caption**: o prompt de estilo (descrição do app + gênero + clima + lo-fi/instrumental) vai dentro de `<prompt>`. **Quando o texto do campo "Estilos" está preenchido, ele é a caption**: o gênero do botão não é acrescentado (não aparece `"Pop style"` junto do texto do usuário) — só sem texto o gênero entra como fallback.
-- **letra**: vai dentro de `<lyrics>`. Sem letra do usuário, o pedido usa `sample_mode: true` e o **próprio LM 5Hz escreve a letra** — a letra volta no campo `content` (`## Lyrics`) e é guardada na faixa.
+- **letra**: vai dentro de `<lyrics>`. Sem letra do usuário, o pedido usa `sample_mode: true` e o **próprio LM 5Hz escreve a letra** — a letra volta no campo `content` (`## Lyrics`) e é guardada na faixa. Com um **tema curto** no campo (sem tags de seção), o tema vai como **`sample_query`** — o modo **Natural Language** da API ("natural language description"): o texto cru chega ao ACE-Step sem passar pelo gerador local nem pelo OpenRouter e o LM expande (ver 4.0.5).
 - **`thinking: true`**: liga o **LM 5Hz**, que gera os códigos semânticos antes do DiT — é o modo de **maior qualidade** (o `thinking: false` faz o DiT rodar em modo text2music, sem os códigos do LM).
 - **`vocal_language`**: vem do idioma do app (`pt`/`en`). Sem isso o LM canta em inglês mesmo com prompt em português (medido: `"Language: en"` → com `pt`, `"Language: pt"` e letra em português).
 - **resposta**: `choices[0].message.audio[0].audio_url.url` = `data:audio/mpeg;base64,…`.
@@ -483,30 +483,36 @@ O teste confere as duas listas (≥ 15 itens cada) e que **todos os temas da lis
 
 ---
 
-### 4.0.5 Tema no campo "Letra" vira letra completa antes de virar áudio
+### 4.0.5 Tema no campo "Letra": Natural Language no ACE-Step, expansão nos outros motores
 
 O campo "Letra" aceita as duas coisas — a própria letra **ou** uma sugestão/tema (o placeholder diz "Escreva a letra de uma música **ou uma sugestão**", e o botão ✨ escreve exatamente um tema ali). Mas **um tema não é uma letra**: era enviado ao motor como se fosse, e o resultado era a mesma frase cantada em todas as frases (medido: **16 frases idênticas** na mesma faixa).
 
-A correção fica em `server/lyrics.js` + `server/api.js`:
+A detecção fica em `server/lyrics.js` + `server/api.js`:
 
 | Camada | O que faz |
 |---|---|
 | `server/lyrics.js` | `isCompleteLyric(texto)` separa **letra** de **tema**: 2+ tags de seção, ou 1 tag com conteúdo, ou 4+ linhas sem tag ⇒ letra; 1–3 linhas sem tag ⇒ tema. `lyricTheme(texto)` devolve o tema (ou vazio se já for letra). |
-| `server/api.js` (`executeJob`) | Antes de chamar o motor, `lyricTheme(lyrics)` detecta o caso e **expande o tema em letra completa** via `generateLyricsWithProvider()` (IA quando há chave, senão gerador local). O tema original fica guardado em `track.lyricsTheme` e `track.lyricsExpanded: true`, e um warning "Tema expandido em letra completa." vai junto (a UI mostra em **info**, não como erro). |
+| `server/api.js` (`executeJob`) | Com o **ACE-Step ativo** (padrão), o tema **não** passa pelo gerador local nem pelo OpenRouter: ele vira **`sample_query`** no corpo do pedido (`sample_mode: true`) — o modo **Natural Language** da API — e o **próprio LM 5Hz expande** o tema antes do DiT (`lyricsEngine: acestep-lm`, warning "Tema expandido pelo modelo do ACE-Step (Natural Language)."). As exceções continuam na expansão local: **instrumental** (sem vocal) e **cover** (a melodia original exige letra pronta) — e se o ACE-Step cair por inteiro, o fallback procedural local expande o tema com os templates. Nos **outros motores** (local/replicate/fal), o tema continua sendo expandido **antes** do motor via `generateLyricsWithProvider()` (IA quando há chave, senão gerador local). |
 
 Garantias (todas verificadas pelo teste):
 
-- Tema ⇒ letra completa com tags e **vocais cantando linhas diferentes**.
+- Tema + ACE-Step ⇒ o pedido leva `sample_query` com o tema **cru** e **sem** `<lyrics>`; a faixa guarda a letra que o LM escreveu (`## Lyrics`) e o tema original (`track.lyricsTheme`, `lyricsExpanded: true`).
+- Tema + motor local ⇒ letra completa com tags e **vocais cantando linhas diferentes**.
 - **Sem letra** ⇒ o motor continua escrevendo a própria (`acestep-lm` / local), como antes.
-- **Letra completa escrita pelo usuário** ⇒ é respeitada **como está**, nunca reescrita.
+- **Letra completa escrita pelo usuário** ⇒ é respeitada **como está**, nunca reescrita (vai em `<lyrics>`, sem `sample_mode`).
 - **Instrumental** ⇒ o tema não vira letra nem gera vocal.
-- Com **ACE-Step** ativo, a letra expandida é a que vai dentro de `<lyrics>` na caption (o `lyricsEngine` do gerador prevalece sobre o `user`).
+
+> **Medido (8 gerações reais, `MUSICGPT_TESTE_LIVE=1`)**: o modo Natural Language funciona de ponta a ponta, mas o LM hosted **não ancora no tema** — em todas as variantes testadas (tema no caption, `sample_query`, instrução explícita, `use_cot_caption` on/off) a letra veio **fluente porém sobre outro assunto** (0 palavras-chave do tema na letra). O gerador local, mais mecânico, **sempre** devolve letra completa e parcialmente fiel. Além disso, o ACE-Step **nem sempre devolve** o bloco `## Lyrics` — nesse caso a faixa fica sem letra no card e um warning honesto vai junto ("O ACE-Step não devolveu a letra escrita pelo modelo…"). Letra fiel ao tema ⇒ escreva a letra ou use a 💡 (que expande antes do motor).
 
 **Teste**
 
 ```bash
-npm run test:letra                  # contrato + HTTP + navegador (Chromium), 37 verificações
+npm run test:letra                  # tema -> letra completa no motor LOCAL (Chromium), 37 verificações
+npm run test:tema                   # contrato + HTTP (stub da API do ACE-Step), 24 verificações
+MUSICGPT_TESTE_LIVE=1 npm run test:tema   # gera de verdade e compara LM x template local
 ```
+
+O `test:tema` sobe um **stub** da API do ACE-Step (chave falsa + `ACESTEP_BASE_URL` local) e prova, sem gastar cota, que: tema ⇒ `sample_mode` + `sample_query` e **sem** `<lyrics>`; letra completa ⇒ `<lyrics>` intacto e sem `sample_mode`; instrumental/cover ⇒ fora do modo sample; campo vazio ⇒ `sample_mode` clássico. A camada live (opcional) gera uma faixa com o tema e imprime a letra do LM lado a lado com a do gerador local, com métricas (linhas, duplicação, fidelidade ao tema).
 
 ---
 
