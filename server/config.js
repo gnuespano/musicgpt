@@ -54,7 +54,7 @@ export const PROVIDERS = {
     },
   },
   lyrics: {
-    mode: process.env.MUSICGPT_LYRICS_PROVIDER || 'auto', // auto | local | openrouter
+    mode: process.env.MUSICGPT_LYRICS_PROVIDER || 'auto', // auto | deepseek | openrouter | openai | local
     openai: {
       key: process.env.OPENAI_API_KEY || '',
       model: process.env.MUSICGPT_OPENAI_MODEL || 'gpt-4o-mini',
@@ -182,6 +182,34 @@ export function openRouterAvailable() {
   return Boolean(OPENROUTER.apiKey);
 }
 
+/**
+ * DeepSeek: gerador de LETRAS que substitui o gerador local de templates.
+ * API compativel com a da OpenAI:
+ *   POST https://api.deepseek.com/chat/completions
+ *     -> { model: "deepseek-chat", messages, response_format: {type:"json_object"} }
+ *     <- choices[0].message.content = '{"letra": "[Verso 1]\\n..."}'
+ *
+ * Sem chave (ou se a chamada falhar), o fluxo cai no gerador local de
+ * templates - o app nunca quebra.
+ *
+ * Chave: https://platform.deepseek.com -> DEEPSEEK_API_KEY no .env
+ * Para forcar/desligar em qualquer cenario: MUSICGPT_LYRICS_PROVIDER
+ *   =deepseek (forca) | =local (desliga, so templates) | =openrouter
+ */
+export const DEEPSEEK = {
+  apiKey: (process.env.DEEPSEEK_API_KEY || '').trim(),
+  baseURL: (process.env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com').replace(/\/+$/, ''),
+  model: (process.env.DEEPSEEK_MODEL || 'deepseek-chat').trim(),
+  timeoutMs: Number(process.env.DEEPSEEK_TIMEOUT_MS || 60000),
+};
+
+/** O DeepSeek esta pronto para uso? */
+export function deepSeekAvailable() {
+  const key = DEEPSEEK.apiKey.toLowerCase();
+  if (PLACEHOLDER_VALUES.has(key)) return false;
+  return key.length >= 12;
+}
+
 export function activeMusicProvider() {
   const { mode, replicate, fal } = PROVIDERS.music;
   if (mode === 'local') return 'local';
@@ -198,8 +226,12 @@ export function activeMusicProvider() {
 export function activeLyricsProvider() {
   const { mode, openai } = PROVIDERS.lyrics;
   if (mode === 'local') return 'local';
+  if (mode === 'deepseek') return deepSeekAvailable() ? 'deepseek' : 'local';
   if (mode === 'openrouter' && openRouterAvailable()) return 'openrouter';
   if (mode === 'openai' && openai.key) return 'openai';
+  // auto: o DeepSeek e o gerador de letras padrao quando ha chave - ele
+  // substitui o gerador local de templates (que vira o fallback)
+  if (deepSeekAvailable()) return 'deepseek';
   if (openRouterAvailable()) return 'openrouter';
   if (openai.key) return 'openai';
   return 'local';
@@ -208,18 +240,20 @@ export function activeLyricsProvider() {
 /**
  * Provider de letra usado na GERACAO PRINCIPAL.
  *
- * Por padrao e o gerador local (templates), para o fluxo de geracao nao
- * depender de rede extra nem de saldo. Para voltar a usar o OpenRouter
- * nessa etapa: MUSICGPT_LYRICS_PROVIDER=openrouter
+ * Por padrao e o DeepSeek (quando ha DEEPSEEK_API_KEY), substituindo o
+ * gerador local de templates; sem chave, tudo segue no local (offline).
+ * Para escolher outro: MUSICGPT_LYRICS_PROVIDER=openrouter | =local
  *
  * (o endpoint /api/lyrics, do botao "Escrever letra", usa
- *  activeLyricsProvider() e continua podendo usar o OpenRouter)
+ *  activeLyricsProvider() e tambem vem ao DeepSeek primeiro no modo auto)
  */
 export function mainLyricsProvider() {
   const { mode } = PROVIDERS.lyrics;
   if (mode === 'openrouter' && openRouterAvailable()) return 'openrouter';
   if (mode === 'openai' && PROVIDERS.lyrics.openai.key) return 'openai';
-  return 'local';
+  if (mode === 'local') return 'local';
+  // auto (ou deepseek explicito): DeepSeek substitui o gerador local
+  return deepSeekAvailable() ? 'deepseek' : 'local';
 }
 
 /**

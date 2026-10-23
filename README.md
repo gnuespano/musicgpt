@@ -49,7 +49,7 @@ O player tem uma **faixa de barras** no topo que reage à frequência da música
 - **Responsivo**: o buffer do canvas é recalculado no `resize`/`orientationchange` e por `ResizeObserver`, respeitando o `devicePixelRatio` (limitado a 2× para não pesar no celular). A faixa encolhe no mobile (`--spectrum-h`) e o player ganha altura (`--player-h`) para acomodá-la sem empurrar o conteúdo.
 - **Fallback**: sem Web Audio API (ou se o navegador bloquear o `AudioContext`), o app continua tocando normalmente — só não há visualização.
 
-Teste automatizado (Chromium headless via CDP; a suíte completa soma **223 verificações**):
+Teste automatizado (Chromium headless via CDP; a suíte completa soma **236 verificações**):
 
 ```bash
 npm test              # precisa do servidor no ar (npm start)
@@ -122,7 +122,7 @@ musicgpt/
 │   ├── providers/
 │   │   ├── acestep.js      # ACE-Step 1.5 (API oficial acemusic.ai) - motor padrão
 │   │   ├── music.js        # acestep | local | replicate | fal
-│   │   └── lyrics.js       # local | openrouter | openai
+│   │   └── lyrics.js       # deepseek | openrouter | openai | local (fallback)
 │   └── audio/
 │       ├── render.js       # composição + síntese (bateria, baixo, pad, arp, lead, voz)
 │       ├── dsp.js          # osciladores, envelopes, filtros, reverb, limiting
@@ -203,13 +203,14 @@ A camada `server/providers/` alterna entre motor local e modelos remotos:
 | `local` | — | Motor próprio, offline, sem chave (fallback procedural). |
 | `replicate` | `REPLICATE_API_TOKEN` | Modelo padrão `minimax/music-01` (música com vocal). |
 | `fal` | `FAL_KEY` | Modelo padrão `fal-ai/minimax-music-01`. |
+| **`deepseek` (letras, padrão)** | `DEEPSEEK_API_KEY` | **Gerador de letras que substituiu o local de templates**: `deepseek-chat` em JSON mode (ver 4.1). |
 | `openai` (letras) | `OPENAI_API_KEY` | Letra completa via `gpt-4o-mini`. |
 
-A seleção é automática: **com `ACESTEP_API_KEY` o ACE-Step é o motor padrão**; sem chave (ou se a chamada remota falhar) o app cai no motor local procedural. Para forçar:
+A seleção é automática: **com `ACESTEP_API_KEY` o ACE-Step é o motor padrão** e, **com `DEEPSEEK_API_KEY`, o DeepSeek é o provedor de letras padrão**; sem chave (ou se a chamada remota falhar) o app cai nos geradores locais. Para forçar:
 
 ```bash
-MUSICGPT_MUSIC_PROVIDER=acestep  # ou local | replicate | fal
-MUSICGPT_LYRICS_PROVIDER=openai  # ou local
+MUSICGPT_MUSIC_PROVIDER=acestep     # ou local | replicate | fal
+MUSICGPT_LYRICS_PROVIDER=deepseek   # ou openrouter | openai | local
 ```
 
 > O provider local **canta** de forma sintética (formantes). É um placeholder honesto de voz, não um vocal de modelo neural. Com o ACE-Step, a faixa passa a ter o **vocal real do modelo**, com o arranjo, a mixagem e a letra feitos pelo ACE-Step.
@@ -492,7 +493,7 @@ A detecção fica em `server/lyrics.js` + `server/api.js`:
 | Camada | O que faz |
 |---|---|
 | `server/lyrics.js` | `isCompleteLyric(texto)` separa **letra** de **tema**: 2+ tags de seção, ou 1 tag com conteúdo, ou 4+ linhas sem tag ⇒ letra; 1–3 linhas sem tag ⇒ tema. `lyricTheme(texto)` devolve o tema (ou vazio se já for letra). |
-| `server/api.js` (`executeJob`) | Com o **ACE-Step ativo** (padrão), o tema **não** passa pelo gerador local nem pelo OpenRouter: ele vira **`sample_query`** no corpo do pedido (`sample_mode: true`) — o modo **Natural Language** da API — e o **próprio LM 5Hz expande** o tema antes do DiT (`lyricsEngine: acestep-lm`, warning "Tema expandido pelo modelo do ACE-Step (Natural Language)."). As exceções continuam na expansão local: **instrumental** (sem vocal) e **cover** (a melodia original exige letra pronta) — e se o ACE-Step cair por inteiro, o fallback procedural local expande o tema com os templates. Nos **outros motores** (local/replicate/fal), o tema continua sendo expandido **antes** do motor via `generateLyricsWithProvider()` (IA quando há chave, senão gerador local). |
+| `server/api.js` (`executeJob`) | Com o **ACE-Step ativo** (padrão), o tema **não** passa pelo gerador local nem pelo OpenRouter: ele vira **`sample_query`** no corpo do pedido (`sample_mode: true`) — o modo **Natural Language** da API — e o **próprio LM 5Hz expande** o tema antes do DiT (`lyricsEngine: acestep-lm`, warning "Tema expandido pelo modelo do ACE-Step (Natural Language)."). As exceções continuam na expansão local: **instrumental** (sem vocal) e **cover** (a melodia original exige letra pronta) — e se o ACE-Step cair por inteiro, o fallback procedural local expande o tema com os templates. Nos **outros motores** (local/replicate/fal), o tema continua sendo expandido **antes** do motor via `generateLyricsWithProvider()` — com o DeepSeek (4.1) quando há `DEEPSEEK_API_KEY`, senão o gerador local. |
 
 Garantias (todas verificadas pelo teste):
 
@@ -509,18 +510,75 @@ Garantias (todas verificadas pelo teste):
 ```bash
 npm run test:letra                  # tema -> letra completa no motor LOCAL (Chromium), 37 verificações
 npm run test:tema                   # contrato + HTTP (stub da API do ACE-Step), 24 verificações
+npm run test:deepseek               # contrato + HTTP (stub da API da DeepSeek), 13 verificações
 MUSICGPT_TESTE_LIVE=1 npm run test:tema   # gera de verdade e compara LM x template local
+MUSICGPT_TESTE_LIVE=1 npm run test:deepseek # letra de verdade via DeepSeek (chave do .env)
 ```
 
 O `test:tema` sobe um **stub** da API do ACE-Step (chave falsa + `ACESTEP_BASE_URL` local) e prova, sem gastar cota, que: tema ⇒ `sample_mode` + `sample_query` e **sem** `<lyrics>`; letra completa ⇒ `<lyrics>` intacto e sem `sample_mode`; instrumental/cover ⇒ fora do modo sample; campo vazio ⇒ `sample_mode` clássico. A camada live (opcional) gera uma faixa com o tema e imprime a letra do LM lado a lado com a do gerador local, com métricas (linhas, duplicação, fidelidade ao tema).
 
 ---
 
-## 4.1 IA real via OpenRouter (letra + voz) — opcional
+## 4.1 DeepSeek (gerador de letras padrão)
 
-O app **não depende** do OpenRouter para gerar música: quem faz isso é o ACE-Step. O OpenRouter continua disponível em dois pontos:
+Substitui o gerador local de templates: com `DEEPSEEK_API_KEY` no `.env`, quem escreve a letra é o **`deepseek-chat`** — no botão 💡 (`/api/lyrics`), na expansão de tema da geração principal e na varinha ✨. O gerador local de templates continua como **fallback offline**: sem chave, com tema vazio, ou se a chamada falhar (rede, saldo 402, 5xx), o app cai nele e a faixa sai com aviso — nunca quebra.
 
-1. **Lâmpada 💡 do bloco Letra** (`POST /api/lyrics`, id `#btnLyricAI`) — usa `openai/gpt-4o-mini` quando há chave: ela manda o **tema do campo** e recebe a letra completa, com uma seed nova por clique (senão o gerador local devolveria sempre a mesma letra). O botão ✨ (`#btnLyricWand`) **não passa pela API**: ele só sorteia um tema da lista local (ver 4.0.4). Se a chamada da 💡 falhar (sem chave, sem crédito 402, sem rede), a própria rota **cai no gerador local offline** e devolve 200 — nunca 502.
+```bash
+# .env na raiz
+DEEPSEEK_API_KEY=sk-...        # https://platform.deepseek.com
+# opcionais:
+#DEEPSEEK_MODEL=deepseek-chat
+#DEEPSEEK_TIMEOUT_MS=60000
+#MUSICGPT_LYRICS_PROVIDER=local   # desliga o DeepSeek (so templates)
+```
+
+### Como funciona (`server/providers/lyrics.js` → `generateLyricsDeepSeek`)
+
+`POST https://api.deepseek.com/chat/completions` com:
+
+- **`response_format: { type: "json_object" }`** — JSON mode: a resposta vem como objeto puro (sem cercas de código), no formato `{"letra": "..."};` a função extrai **só a letra** do JSON;
+- **system prompt** de compositor brasileiro: letra **original em português do Brasil**, estrutura de música de verdade (`[Verso 1]`, `[Refrão]`, `[Verso 2]`, `[Refrão]`, opcionalmente `[Ponte]`), métrica cantável, rimas consistentes e imagens concretas;
+- **user prompt** com o tema + o gênero do campo Estilos (quando preenchido);
+- `temperature: 0.9`, `max_tokens: 900`, timeout configurável.
+
+A chamada aparece no log do servidor (`server.log`):
+
+```text
+[letras] pedindo letra ao DeepSeek (deepseek-chat): "Uma musica sobre recomecar..."
+[letras] DeepSeek devolveu a letra (876 chars)
+```
+
+### Fallbacks (o app nunca quebra)
+
+| Falha | Comportamento |
+|---|---|
+| Sem `DEEPSEEK_API_KEY` | gerador local de templates (nem chama a API) |
+| Sem saldo (402), 5xx, timeout, rede | idem: o app segue no local e o log diz o motivo |
+| Resposta fora do esperado (JSON inválido, letra vazia) | idem |
+| Tema vazio (o usuário digitou a letra) | a letra escrita pelo usuário **não passa pelo DeepSeek** |
+
+Em todos os casos o resultado vem com `engine: 'local-templates'` (e o card de resultado avisa), então dá para saber de onde veio a letra.
+
+**Provedores de letra: a cadeia**
+
+`activeLyricsProvider()` (botão 💡) e `mainLyricsProvider()` (expansão de tema na geração) seguem, no modo `auto` (padrão): **deepseek → openrouter → openai → local**. `MUSICGPT_LYRICS_PROVIDER` força um (`=local` desliga tudo e deixa só templates — é o que os testes usam para não chamar API real).
+
+**Teste**
+
+```bash
+npm run test:deepseek                    # contrato + HTTP (stub da API da DeepSeek), 13 verificações
+MUSICGPT_TESTE_LIVE=1 npm run test:deepseek   # chamada real com a chave do .env
+```
+
+O `test:deepseek` sobe um **stub** da API da DeepSeek (chave falsa + `DEEPSEEK_BASE_URL` local) e prova, sem gastar saldo, que: `/api/lyrics` e a expansão de tema usam `deepseek-chat` em **JSON mode** com o system prompt de compositor brasileiro e o tema no prompt; a letra extraída do JSON vira a faixa (`engine: deepseek`); 500 ou chave vazia ⇒ **gerador local** (`engine: local-templates`, app não quebra); letra escrita pelo usuário ⇒ não toca no DeepSeek. A camada live (opcional) gera letra de verdade e imprime o resultado.
+
+---
+
+## 4.2 IA real via OpenRouter (letra + voz) — opcional
+
+O app **não depende** do OpenRouter para gerar música: quem faz isso é o ACE-Step. No modo `auto`, a **letra já vem do DeepSeek (4.1)**; o OpenRouter fica como segunda opção da cadeia (`deepseek → openrouter → openai → local`) e continua disponível em dois pontos:
+
+1. **Lâmpada 💡 do bloco Letra** (`POST /api/lyrics`, id `#btnLyricAI`) — usa o DeepSeek com `DEEPSEEK_API_KEY` e, na ausência dela, `openai/gpt-4o-mini` do OpenRouter quando há chave: ela manda o **tema do campo** e recebe a letra completa, com uma seed nova por clique (senão o gerador local devolveria sempre a mesma letra). O botão ✨ (`#btnLyricWand`) **não passa pela API**: ele só sorteia um tema da lista local (ver 4.0.4). Se a chamada da 💡 falhar (sem chave, sem crédito 402, sem rede), a própria rota **cai no gerador local offline** e devolve 200 — nunca 502.
 2. **TTS** — só no motor local e **apenas** se você escolher "Voz por IA (OpenRouter)" na interface (ou `MUSICGPT_TTS_PROVIDER=openrouter`).
 
 Quando a chave está em `.env`:
@@ -621,10 +679,10 @@ cd musicgpt
 npm install          # só o encoder de MP3
 npm start            # porta 8787 (PORT=xxxx para trocar)
 npm run dev          # com --watch
-npm test             # testes locais (referência + estilo + varinha + letra + modo do áudio + espectro + download) - servidor precisa estar no ar
+npm test             # testes locais (referência + estilo + varinha + letra + tema natural + deepseek + modo do áudio + espectro + download) - servidor precisa estar no ar
 ```
 
-Variáveis úteis: `PORT`, `HOST`, `MUSICGPT_DATA_DIR`, `MUSICGPT_MUSIC_PROVIDER`, `MUSICGPT_LYRICS_PROVIDER`, `MUSICGPT_TTS_PROVIDER`, `ACESTEP_API_KEY`, `ACESTEP_BASE_URL`, `ACESTEP_MODEL`, `ACESTEP_THINKING`, `ACESTEP_VOCAL_LANGUAGE`, `ACESTEP_DURATION_FACTOR`, `ACESTEP_REFERENCE_STRENGTH`, `ACESTEP_TIMEOUT_MS`, `MUSICGPT_MAX_REFERENCE_BYTES`, `REPLICATE_API_TOKEN`, `FAL_KEY`, `OPENAI_API_KEY`, `OPENROUTER_API_KEY`, `MUSICGPT_SSL_CERT`, `MUSICGPT_SSL_KEY`.
+Variáveis úteis: `PORT`, `HOST`, `MUSICGPT_DATA_DIR`, `MUSICGPT_MUSIC_PROVIDER`, `MUSICGPT_LYRICS_PROVIDER`, `MUSICGPT_TTS_PROVIDER`, `ACESTEP_API_KEY`, `ACESTEP_BASE_URL`, `ACESTEP_MODEL`, `ACESTEP_THINKING`, `ACESTEP_VOCAL_LANGUAGE`, `ACESTEP_DURATION_FACTOR`, `ACESTEP_REFERENCE_STRENGTH`, `ACESTEP_TIMEOUT_MS`, `MUSICGPT_MAX_REFERENCE_BYTES`, `DEEPSEEK_API_KEY`, `DEEPSEEK_MODEL`, `DEEPSEEK_BASE_URL`, `DEEPSEEK_TIMEOUT_MS`, `REPLICATE_API_TOKEN`, `FAL_KEY`, `OPENAI_API_KEY`, `OPENROUTER_API_KEY`, `MUSICGPT_SSL_CERT`, `MUSICGPT_SSL_KEY`.
 
 ### Porta
 

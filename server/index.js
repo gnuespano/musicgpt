@@ -8,7 +8,7 @@ import https from 'node:https';
 import fs from 'node:fs';
 import path from 'node:path';
 import { HOST, PUBLIC_DIR, resolvePort } from './config.js';
-import { activeMusicProvider, aceStepAvailable } from './config.js';
+import { activeMusicProvider, aceStepAvailable, activeLyricsProvider, mainLyricsProvider, deepSeekAvailable } from './config.js';
 import { handlers, json } from './api.js';
 
 /**
@@ -153,6 +153,14 @@ server.listen(PORT, HOST, () => {
   if (!aceStepAvailable()) {
     console.log('  -> ACESTEP_API_KEY ausente: usando o motor procedural local.');
     console.log('     pegue a chave gratuita em https://acemusic.ai/api-key e coloque no .env');
+  }
+  const letras = activeLyricsProvider();
+  const letrasPrincipal = mainLyricsProvider();
+  console.log(`  -> provedor de letras: ${letras}${letras === 'deepseek' ? ' (DeepSeek)' : ''}`);
+  if (letrasPrincipal !== letras) console.log(`     letras na geracao principal: ${letrasPrincipal}`);
+  if (letras === 'local' && !deepSeekAvailable()) {
+    console.log('  -> DEEPSEEK_API_KEY ausente: letras no gerador local de templates.');
+    console.log('     pegue a chave em https://platform.deepseek.com e coloque no .env');
   }
   if (useHttps) {
     console.log('  -> PWA instalável (origem segura). Para o celular, use o IP da rede local ou um túnel HTTPS.');
