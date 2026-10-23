@@ -7,9 +7,10 @@
  *  - "Estilos" (btnStyleWand): sortea uma descricao de estilo aleatoria.
  *    O texto passa a ter prioridade (os chips de genero ficam esmaecidos e
  *    o aviso de prioridade aparece).
- *  - "Letra"    (btnLyricWand): sortea um tema aleatorio para a letra.
- *  - "IA"       (btnLyricAI) : continua gerando a letra de verdade (motor
- *    local/offline) - a funcao da varinha nao substituiu esse caminho.
+ *  - "Letra"    (btnLyricWand): usa o tema do campo e GERA a letra de
+ *    verdade (chama /api/lyrics).
+ *  - "Ideia"    (btnLyricAI) : sortea APENAS um tema curto (1 linha) da
+ *    lista LYRIC_THEMES e escreve no campo - sem verso/refrao e sem rede.
  *
  * Alem disso confere o efeito visual da varinha (classe `is-magic` com a
  * animacao magicGlow/magicSpin), que dois cliques seguidos nao repetem a
@@ -208,19 +209,62 @@ try {
     letraDoTema !== letra1.valor, `${JSON.stringify(letra1.valor.slice(0, 30))} vs ${JSON.stringify(letraDoTema.slice(0, 30))}`);
 
   /* ---------------------------------------------------------------- *
-   * 4. O botao "IA" continua gerando letra a partir de Estilos
+   * 4. O botao ✦ (💡 ideia) sorteia APENAS um tema de 1 linha
    * ---------------------------------------------------------------- */
 
+  // quantas vezes a pagina ja chamou /api/lyrics ate aqui (só a varinha)
+  const chamadasApi = () => browser.cdp.eval(`(() => performance
+    .getEntriesByType('resource')
+    .filter((e) => e.name.includes('/api/lyrics')).length)`);
+
+  // colapsa o bloco e zera o marcador visual para medir o clique do ✦
+  await browser.cdp.eval(`(() => {
+    document.querySelector('#toggleLyrics').closest('.block').classList.add('is-collapsed');
+    window.__magic.letra = false;
+    return true;
+  })`);
+  await delay(200);
+
+  const chamadasAntes = await chamadasApi();
+  await limpaToasts(browser.cdp);
   await realClick(browser.cdp, '#btnLyricAI');
 
-  let letraIA = '';
+  const ideia1 = await browser.cdp.eval(`(() => document.querySelector('#customLyrics').value.trim())`);
+  check('o botao ✦ preenche o campo com um tema DA LISTA',
+    listas.temas.includes(ideia1), JSON.stringify(ideia1));
+  check('o botao ✦ escreve so 1 linha, sem tags de secao',
+    !ideia1.includes('\n') && !/\[[A-Za-zÀ-ú]/.test(ideia1), JSON.stringify(ideia1));
+  check('o botao ✦ NAO deixa verso/refrao no campo (saiu a letra anterior)',
+    ideia1 !== letraDoTema && ideia1.length < 120, `${ideia1.length} chars`);
+  check('o botao ✦ nao chama a API de letras (sorteio local, offline)',
+    (await chamadasApi()) === chamadasAntes,
+    `${chamadasAntes} -> ${await chamadasApi()} chamadas`);
+  check('o bloco "Letra" abre quando o tema e sorteado',
+    !(await browser.cdp.eval(`(() => document.querySelector('#bodyLyrics').closest('.block').classList.contains('is-collapsed'))`)));
+  check('o campo de Letra ganha a animacao da varinha ao sortear o tema (is-magic)',
+    (await browser.cdp.eval(`(() => window.__magic.letra)`)));
+
+  await limpaToasts(browser.cdp);
+  await realClick(browser.cdp, '#btnLyricAI');
+  const ideia2 = await browser.cdp.eval(`(() => document.querySelector('#customLyrics').value.trim())`);
+  check('dois cliques seguidos do ✦ nao repetem o mesmo tema',
+    ideia1 !== ideia2 && listas.temas.includes(ideia2), JSON.stringify(ideia2));
+
+  // o fluxo completo: ✦ sorteia o tema e a varinha o transforma em letra
+  await limpaToasts(browser.cdp);
+  await realClick(browser.cdp, '#btnLyricWand');
+
+  let letraDoNovoTema = '';
   for (let i = 0; i < 40; i += 1) {
     const valor = await browser.cdp.eval(`(() => document.querySelector('#customLyrics').value.trim())`);
-    if (valor && valor !== letraDoTema) { letraIA = valor; break; }
+    if (valor && valor !== ideia2) { letraDoNovoTema = valor; break; }
     await delay(400);
   }
-  check('o botao "IA" gera a letra de verdade (motor local)',
-    letraIA.length > 40 && /verso|refr[ãa]o|intro/i.test(letraIA), `${letraIA.slice(0, 80)}...`);
+  check('depois do ✦, a varinha transforma o tema em letra COMPLETA',
+    letraDoNovoTema.length > 40 && /\[[A-Za-zÀ-ú]/.test(letraDoNovoTema),
+    `${letraDoNovoTema.slice(0, 60)}...`);
+  check('a letra gerada nao e o tema sorteado pelo ✦',
+    letraDoNovoTema !== ideia2, JSON.stringify(letraDoNovoTema.slice(0, 40)));
 
   /* ---------------------------------------------------------------- *
    * 5. Layout mobile (os dois botoes do bloco Letra cabem na tela)

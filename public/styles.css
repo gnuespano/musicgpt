@@ -549,7 +549,8 @@ code { background: #0e0e15; border: 1px solid var(--line); border-radius: 5px; p
 .icon-btn.wand svg { width: 17px; height: 17px; }
 .icon-btn.wand.is-busy { opacity: .6; pointer-events: none; }
 
-/* botao "IA" ao lado da varinha: gera a letra com IA (fora do sorteio) */
+/* botao da IDEIA (💡) ao lado da varinha: sorteia so o tema (1 linha),
+   sem gerar a letra - a geracao continua sendo da varinha (✨) */
 .head-actions { display: flex; align-items: center; gap: 6px; flex: none; }
 .icon-btn.wand-ai {
   width: 34px; height: 34px; flex: none;

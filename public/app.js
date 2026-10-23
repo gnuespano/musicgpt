@@ -419,8 +419,10 @@ const STYLE_SUGGESTIONS = [
 ];
 
 /**
- * Temas de LETRA (ideias para a música). A varinha do bloco "Letra"
- * sorteia um deles e escreve no campo.
+ * Temas de LETRA (ideias curtas de 1 linha para a música). O botao ✦ do
+ * bloco "Letra" sorteia um deles e escreve no campo; a varinha (✨) usa o
+ * tema do campo (ou sorteia um desses, se o campo estiver vazio) como
+ * semente da letra COMPLETA.
  */
 const LYRIC_THEMES = [
   'Uma música sobre dirigir na estrada à noite',
@@ -1542,11 +1544,12 @@ function bind() {
   const novaSeed = () => Math.floor(Math.random() * 2 ** 31);
 
   /**
-   * Gerador da letra usado pelos dois botoes do bloco.
+   * Gerador da letra COMPLETA: usado pela varinha (✨) do bloco "Letra".
    *
-   * `tema` e o texto que vira semente da letra (o proprio campo "Letra", ou
-   * o texto de Estilos no botao "IA"). O backend escreve a letra completa -
-   * com IA quando ha chave, senao com o gerador local - e devolve o texto.
+   * `tema` e o texto que vira semente da letra (o proprio campo "Letra").
+   * O backend escreve a letra completa - com IA quando ha chave, senao com
+   * o gerador local - e devolve o texto. O botao ✦ NAO passa por aqui: ele
+   * so sorteia o tema (ver o listener dele logo abaixo).
    */
   async function gerarLetra({ tema, btn }) {
     btn.classList.add('is-busy');
@@ -1581,19 +1584,25 @@ function bind() {
     }
   });
 
-  // "IA" no bloco da letra: gera a partir do texto de Estilos (mesmo caminho)
-  $('#btnLyricAI').addEventListener('click', async () => {
-    const prompt = $('#prompt').value.trim() || $('#lyricsPrompt').value.trim();
-    if (!prompt) {
-      toast('Escreva um estilo primeiro — a letra nasce da ideia.', 'error');
-      $('#prompt').focus();
-      return;
-    }
-    try {
-      await gerarLetra({ tema: prompt, btn: $('#btnLyricAI') });
-    } catch (err) {
-      toast(err.message, 'error');
-    }
+  /**
+   * Estrela/lampada do bloco "Letra" (✦): sorteia APENAS um tema curto -
+   * uma frase de 1 linha, ex.: "Uma música sobre a saudade da infância na
+   * praia" - e escreve no campo. NAO gera verso/refrao e NAO chama a API:
+   * a lista LYRIC_THEMES vive no front-end, entao funciona offline e nao
+   * gasta cota. Quem transforma o tema em letra completa e a varinha (✨)
+   * ao lado, unica dona do gerarLetra().
+   */
+  $('#btnLyricAI').addEventListener('click', () => {
+    const campo = $('#customLyrics');
+    const btn = $('#btnLyricAI');
+    const tema = pickRandom(LYRIC_THEMES, campo.value.trim());
+    if (!tema) return;
+    campo.value = tema;
+    campo.dispatchEvent(new Event('input', { bubbles: true }));
+    expandBlock('lyrics');
+    magicEffect(campo, btn);
+    toast('Tema sorteado — a varinha ✨ transforma em letra completa.', 'ok');
+    return tema;
   });
 
   // varinha de estilo: sorteia uma descricao de estilo aleatoria
