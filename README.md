@@ -49,7 +49,7 @@ O player tem uma **faixa de barras** no topo que reage à frequência da música
 - **Responsivo**: o buffer do canvas é recalculado no `resize`/`orientationchange` e por `ResizeObserver`, respeitando o `devicePixelRatio` (limitado a 2× para não pesar no celular). A faixa encolhe no mobile (`--spectrum-h`) e o player ganha altura (`--player-h`) para acomodá-la sem empurrar o conteúdo.
 - **Fallback**: sem Web Audio API (ou se o navegador bloquear o `AudioContext`), o app continua tocando normalmente — só não há visualização.
 
-Teste automatizado (Chromium headless via CDP; a suíte completa soma **193 verificações**):
+Teste automatizado (Chromium headless via CDP; a suíte completa soma **196 verificações**):
 
 ```bash
 npm test              # precisa do servidor no ar (npm start)
@@ -464,6 +464,7 @@ Regras do sorteio de estilo e de tema (`public/app.js`):
 - **Zero rede.** As listas vivem no front-end (`STYLE_SUGGESTIONS` e `LYRIC_THEMES`); nenhum request é feito. É por isso que funciona offline e não gasta cota de API.
 - **Sem repetição.** `pickRandom(lista, valorAtual)` remove o valor que já está no campo antes de sortear — dois cliques seguidos **nunca** devolvem a mesma sugestão (verificado no teste, nos dois botões).
 - **Só o tema, nunca a letra.** O 💡 escreve uma linha única, sem tags de seção — o teste garante que a letra completa anterior é substituída pelo tema e que nenhuma chamada a `/api/lyrics` acontece nesse clique.
+- **Blindagem (`temaCurto()`).** Antes de escrever no campo, o item sorteado passa por `temaCurto(texto)`: pula linhas que são só tag (`[Verse 1]`) e remove uma tag embutida no início (`[Chorus] amor na rua` → `amor na rua`). Mesmo que um item da lista venha errado (multiplas linhas / estrutura de música), o campo **nunca** recebe Verso/Refrão por este caminho — o teste injeta um item corrompido na lista e confere (seção 4.1 do `testar-varinha`).
 
 Regras da geração de letra (da varinha ✨, em `gerarLetra()`):
 
@@ -475,10 +476,10 @@ Regras da geração de letra (da varinha ✨, em `gerarLetra()`):
 **Teste**
 
 ```bash
-npm run test:varinha                # navegador headless (Chromium), motor local, 29 verificações
+npm run test:varinha                # navegador headless (Chromium), motor local, 32 verificações
 ```
 
-O teste confere as duas listas (≥ 15 itens cada), que a varinha de **Estilos** preenche o campo com um item **da lista** sem repetir, que a animação `is-magic` dispara no campo e no botão, que os chips de gênero ficam desativados (prioridade do texto), que a varinha de **Letra** **gera** letra completa (com tags de seção) a partir do tema digitado — e que dois cliques com o mesmo tema dão letras diferentes —, que o botão **💡 só sorteia um tema** de 1 linha (item da lista, sem tags de seção, **sem chamar `/api/lyrics`**), que **dois cliques seguidos do 💡 não repetem o tema**, que depois dele a varinha ✨ **transforma aquele tema em letra completa**, que o bloco "Letra" é reaberto e que o layout **mobile** (390 px) segue sem overflow.
+O teste confere as duas listas (≥ 15 itens cada) e que **todos os temas da lista da 💡 são frases de 1 linha, sem `[tags]`**; que a varinha de **Estilos** preenche o campo com um item **da lista** sem repetir, que a animação `is-magic` dispara no campo e no botão, que os chips de gênero ficam desativados (prioridade do texto), que a varinha de **Letra** **gera** letra completa (com tags de seção) a partir do tema digitado — e que dois cliques com o mesmo tema dão letras diferentes —, que o botão **💡 só sorteia um tema** de 1 linha (item da lista, sem tags de seção, **sem chamar `/api/lyrics`**), que **dois cliques seguidos do 💡 não repetem o tema**, que depois dele a varinha ✨ **transforma aquele tema em letra completa**, que **um item corrompido na lista não vaza estrutura de música para o campo** (blindagem `temaCurto()`), que o bloco "Letra" é reaberto e que o layout **mobile** (390 px) segue sem overflow.
 
 ---
 

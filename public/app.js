@@ -450,6 +450,22 @@ const LYRIC_THEMES = [
 ];
 
 /**
+ * Forma aceita pelo botao ✦ do bloco "Letra": UMA frase curta, sem
+ * estrutura de musica.
+ *
+ * Corta na primeira linha util (pulando tags puras como "[Verse 1]") e
+ * remove uma tag embutida no inicio ("[Chorus] amor na rua" -> "amor na
+ * rua"). Assim, mesmo que um item da lista venha errado - ou que a lista
+ * seja trocada por uma com letras prontas - o campo NUNCA recebe verso,
+ * refrao ou multiplas linhas por este caminho. Vazio = nada a preencher.
+ */
+function temaCurto(texto) {
+  const linhas = String(texto || '').split('\n').map((l) => l.trim()).filter(Boolean);
+  const linha = linhas.find((l) => !/^\[[^\]]*\]$/.test(l)) || '';
+  return linha.replace(/^\[[^\]]*\]\s*/, '').trim();
+}
+
+/**
  * Sorteia um item da lista, evitando repetir o valor atual do campo
  * (quando ele esta na lista) — assim dois cliques seguidos sempre
  * mudam a sugestao.
@@ -1595,7 +1611,8 @@ function bind() {
   $('#btnLyricAI').addEventListener('click', () => {
     const campo = $('#customLyrics');
     const btn = $('#btnLyricAI');
-    const tema = pickRandom(LYRIC_THEMES, campo.value.trim());
+    // lista local -> 1 linha curta (temaCurto garante que nunca vire letra)
+    const tema = temaCurto(pickRandom(LYRIC_THEMES, campo.value.trim()));
     if (!tema) return;
     campo.value = tema;
     campo.dispatchEvent(new Event('input', { bubbles: true }));

@@ -11,6 +11,8 @@
  *    verdade (chama /api/lyrics).
  *  - "Ideia"    (btnLyricAI) : sortea APENAS um tema curto (1 linha) da
  *    lista LYRIC_THEMES e escreve no campo - sem verso/refrao e sem rede.
+ *    A funcao temaCurto() garante isso mesmo que um item da lista venha
+ *    com estrutura de musica (testado na secao 4.1).
  *
  * Alem disso confere o efeito visual da varinha (classe `is-magic` com a
  * animacao magicGlow/magicSpin), que dois cliques seguidos nao repetem a
@@ -113,6 +115,13 @@ try {
     listas.estilos.every((s) => typeof s === 'string' && s.trim().length > 10));
   check('os temas de letra sao textos nao vazios',
     listas.temas.every((s) => typeof s === 'string' && s.trim().length > 10));
+
+  // auditoria da lista da estrela: so frases curtas de 1 linha - nada de
+  // estrutura de musica ([Intro], [Refrão]) nem multiplas linhas
+  const temasEstruturados = listas.temas.filter((t) => typeof t !== 'string'
+    || t.includes('\n') || /[[\]]/.test(t) || t.length < 10 || t.length > 100);
+  check('todos os temas da lista da estrela sao frases curtas de 1 linha (sem tags)',
+    temasEstruturados.length === 0, JSON.stringify(temasEstruturados));
 
   /* ---------------------------------------------------------------- *
    * 2. Varinha de "Estilos"
@@ -265,6 +274,39 @@ try {
     `${letraDoNovoTema.slice(0, 60)}...`);
   check('a letra gerada nao e o tema sorteado pelo ✦',
     letraDoNovoTema !== ideia2, JSON.stringify(letraDoNovoTema.slice(0, 40)));
+
+  /* ---------------------------------------------------------------- *
+   * 4.1 Blindagem: item errado na lista nao vira letra no campo
+   * ---------------------------------------------------------------- */
+
+  // troca a lista por um item COM estrutura de musica (multiplas linhas e
+  // tags) para provar que temaCurto() nunca deixa isso chegar ao campo
+  const temasOriginais = listas.temas.slice();
+  await browser.cdp.eval(`(() => {
+    const lista = window.MUSICGPT_LYRIC_THEMES;
+    lista.length = 0;
+    lista.push('[Verse 1]\\nlinha que nao pode vazar\\n[Chorus]\\nrefrao que nao pode vazar');
+    document.querySelector('#customLyrics').value = 'texto antigo no campo';
+    return true;
+  })`);
+  await limpaToasts(browser.cdp);
+  await realClick(browser.cdp, '#btnLyricAI');
+
+  const semEstrutura = await browser.cdp.eval(`(() => document.querySelector('#customLyrics').value.trim())`);
+  check('mesmo com item errado na lista, o ✦ escreve so 1 linha sem tags',
+    semEstrutura === 'linha que nao pode vazar', JSON.stringify(semEstrutura));
+  check('o ✦ nao deixa [Verso]/[Refrão] nem multiplas linhas no campo',
+    !semEstrutura.includes('[') && !semEstrutura.includes('\n') && !/refrao/i.test(semEstrutura),
+    JSON.stringify(semEstrutura));
+
+  // restaura a lista original para os testes seguintes
+  await browser.cdp.eval(`(() => {
+    const lista = window.MUSICGPT_LYRIC_THEMES;
+    const itens = ${JSON.stringify(temasOriginais)};
+    lista.length = 0;
+    itens.forEach((t) => lista.push(t));
+    return lista.length;
+  })`);
 
   /* ---------------------------------------------------------------- *
    * 5. Layout mobile (os dois botoes do bloco Letra cabem na tela)
