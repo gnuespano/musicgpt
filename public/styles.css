@@ -539,6 +539,8 @@ code { background: #0e0e15; border: 1px solid var(--line); border-radius: 5px; p
 .block-body { padding: 0 12px 13px; display: flex; flex-direction: column; gap: 10px; }
 .block-body .switch { margin: 4px 0 0; }
 
+/* estrela ✦ do bloco Letra (lado direito da lampada): sorteia so o tema,
+   1 linha, sem rede - o is-busy nunca e usado (nao ha request) */
 .icon-btn.wand {
   width: 34px; height: 34px; flex: none;
   background: linear-gradient(135deg, #ffffff, #e6e1ff);
@@ -549,8 +551,8 @@ code { background: #0e0e15; border: 1px solid var(--line); border-radius: 5px; p
 .icon-btn.wand svg { width: 17px; height: 17px; }
 .icon-btn.wand.is-busy { opacity: .6; pointer-events: none; }
 
-/* botao da IDEIA (💡) ao lado da varinha: sorteia so o tema (1 linha),
-   sem gerar a letra - a geracao continua sendo da varinha (✨) */
+/* lampada 💡 ao lado da estrela: a UNICA que gera a letra COMPLETA
+   (chama /api/lyrics) - por isso ela e a que usa is-busy durante a chamada */
 .head-actions { display: flex; align-items: center; gap: 6px; flex: none; }
 .icon-btn.wand-ai {
   width: 34px; height: 34px; flex: none;
@@ -575,10 +577,11 @@ code { background: #0e0e15; border: 1px solid var(--line); border-radius: 5px; p
   100% { transform: rotate(0deg) scale(1); }
 }
 textarea.is-magic { animation: magicGlow .8s ease-out; }
-.icon-btn.wand.is-magic { animation: magicSpin .6s ease; }
+.icon-btn.wand.is-magic,
+.icon-btn.wand-ai.is-magic { animation: magicSpin .6s ease; }
 
 @media (prefers-reduced-motion: reduce) {
-  textarea.is-magic, .icon-btn.wand.is-magic { animation: none; box-shadow: 0 0 0 3px rgba(180, 108, 255, .45); }
+  textarea.is-magic, .icon-btn.wand.is-magic, .icon-btn.wand-ai.is-magic { animation: none; box-shadow: 0 0 0 3px rgba(180, 108, 255, .45); }
 }
 
 /* slider de variedade com marcas */

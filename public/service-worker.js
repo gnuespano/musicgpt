@@ -12,7 +12,7 @@
  *    sem rede. WAV/download nunca é cacheado (arquivos grandes, baixa vez).
  */
 
-const VERSION = 'v3';
+const VERSION = 'v4';
 const SHELL_CACHE = `musicgpt-shell-${VERSION}`;
 const DATA_CACHE = `musicgpt-data-${VERSION}`;
 const AUDIO_CACHE = `musicgpt-audio-${VERSION}`;

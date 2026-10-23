@@ -49,7 +49,7 @@ O player tem uma **faixa de barras** no topo que reage à frequência da música
 - **Responsivo**: o buffer do canvas é recalculado no `resize`/`orientationchange` e por `ResizeObserver`, respeitando o `devicePixelRatio` (limitado a 2× para não pesar no celular). A faixa encolhe no mobile (`--spectrum-h`) e o player ganha altura (`--player-h`) para acomodá-la sem empurrar o conteúdo.
 - **Fallback**: sem Web Audio API (ou se o navegador bloquear o `AudioContext`), o app continua tocando normalmente — só não há visualização.
 
-Teste automatizado (Chromium headless via CDP; a suíte completa soma **196 verificações**):
+Teste automatizado (Chromium headless via CDP; a suíte completa soma **199 verificações**):
 
 ```bash
 npm test              # precisa do servidor no ar (npm start)
@@ -171,8 +171,8 @@ Cada faixa guarda os metadados: BPM, tom, estrutura, progressão, vozes cantadas
 
 ```
 [ Áudio ref. ]   [ + Voz ]
-┌ Letra        ✨ [💡] ┐   varinha ✨ = gera a letra COMPLETA a partir do tema do campo
-│  textarea           │   [💡] ideia = sorteia só um tema de 1 linha (sem letra)
+┌ Letra        [💡] ✨ ┐   [💡] lampada = gera a letra COMPLETA a partir do tema do campo
+│  textarea           │   ✨ estrela = sorteia só um tema de 1 linha (sem letra)
 │  toggle "Instrumental" dentro do bloco
 └─────────────────────────┘
 ┌ Estilos          ✨ ┐   varinha = sorteia uma descrição de estilo aleatória
@@ -186,7 +186,7 @@ Cada faixa guarda os metadados: BPM, tom, estrutura, progressão, vozes cantadas
 ```
 
 - **Variedade** (0–100) altera o arranjo no motor: densidade do arpejo, repetição da melodia, inversões de acorde e fills de bateria. 0 = parado e repetitivo, 100 = mais disperso (medido: 33% de diferença na forma de onda entre os extremos).
-- **Varinha mágica** (✨) e **ideia** (💡): nos blocos **Estilos** e **Letra** os botões **sorteiam** itens de listas locais — 22 descrições de estilo ("Lo-fi chill com piano suave, chuva de fundo e textura de vinil") e 22 temas de letra ("Uma música sobre dirigir na estrada à noite"). No **Letra**, o 💡 escreve **só o tema** no campo e a ✨ é quem o transforma em letra completa. O campo acende com um brilho (`is-magic`) e dois cliques seguidos nunca repetem a mesma sugestão. O sorteio é offline: nada vai para a API (ver 4.0.4).
+- **Sorteio (✨) e geração (💡)**: nos blocos **Estilos** e **Letra** os botões **sorteiam** itens de listas locais — 22 descrições de estilo ("Lo-fi chill com piano suave, chuva de fundo e textura de vinil") e 22 temas de letra ("Uma música sobre dirigir na estrada à noite"). No **Letra**, a **✨ estrela** escreve **só o tema** no campo e a **💡 lâmpada** é quem o transforma em letra completa (única a chamar a API). O campo acende com um brilho (`is-magic`) e dois cliques seguidos nunca repetem a mesma sugestão. O sorteio é offline: nada vai para a API (ver 4.0.4).
 - **+ Voz** abre o seletor: **Automático** (IA se houver chave), **Voz por IA (OpenRouter)** ou **Voz procedural (local)**, com 10 vozes (alloy, coral, onyx, ash, echo, fable, shimmer, nova, sage, verse).
 - **Áudio ref.** anexa um arquivo de áudio para a geração seguir o estilo/timbre dele (ver 4.0.1). O nome do arquivo aparece logo abaixo do campo de ideia, com botão para remover e o **seletor de modo**: *Estilo (Remix)* ou *Cover (Manter Melodia)* (ver 4.0.2).
 - **Prioridade do estilo**: o **texto do campo "Estilos" manda sempre**. Quando ele está preenchido, os botões de gênero (Pop, MPB, …) são **ignorados** — ficam esmaecidos, não aceitam clique e o app avisa ("O texto digitado tem prioridade"). Só quando o texto está **vazio** o botão selecionado entra como fallback. A regra é garantida nos dois lados: o front-end manda `style` (o texto) e `genre` vazio, e o servidor ignora o gênero quando recebe o texto (`styleSource: "text"`).
@@ -451,22 +451,22 @@ campo de estilo, clica em **Criar** e confere o card: a tag `ref: <arquivo>` apa
 
 ### 4.0.4 Varinha mágica: sorteia estilo/tema e **gera** letra
 
-Os dois blocos da tela "Criar" têm botões de mágica (✨ e 💡):
+Os dois blocos da tela "Criar" têm botões de mágica (💡 e ✨):
 
 | Bloco | Botão | O que faz |
 |---|---|---|
 | **Estilos** | `#btnStyleWand` | Sorteia uma das **22 descrições de estilo** (`STYLE_SUGGESTIONS`) e preenche o campo de ideia (offline, sem request). Como o texto passa a existir, `syncStylePriority()` entra em ação: os chips de gênero ficam esmaecidos e o aviso "O texto digitado tem prioridade" aparece (ver 4.0.3). |
-| **Letra** | `#btnLyricWand` (✨) | Lê o **texto atual do campo** (o tema) e chama `POST /api/lyrics` para **gerar a letra completa**. Sem texto no campo, ela sorteia um dos **22 temas** (`LYRIC_THEMES`) e gera a partir dele. O bloco é reaberto e o campo ganha o efeito `is-magic`. |
-| **Letra** | `#btnLyricAI` (💡) | **Sorteia apenas um tema curto** (uma frase de 1 linha, ex.: "Uma música sobre a saudade da infância na praia") entre os **22 temas** (`LYRIC_THEMES`) e escreve **só isso** no campo — **não** gera verso/refrão e **não** chama a API. O tema é a semente que a varinha ✨ ao lado transforma em letra completa. |
+| **Letra** | `#btnLyricAI` (💡) | Lê o **texto atual do campo** (o tema) e chama `POST /api/lyrics` para **gerar a letra completa** — é o **único** botão do bloco que chama a API. Sem texto no campo, ela sorteia um dos **22 temas** (`LYRIC_THEMES`) e gera a partir dele. O bloco é reaberto e o campo ganha o efeito `is-magic`. |
+| **Letra** | `#btnLyricWand` (✨) | **Sorteia apenas um tema curto** (uma frase de 1 linha, ex.: "Uma música sobre a saudade da infância na praia") entre os **22 temas** (`LYRIC_THEMES`) e escreve **só isso** no campo — **não** gera verso/refrão e **não** chama a API. O tema é a semente que a lâmpada 💡 ao lado transforma em letra completa. |
 
 Regras do sorteio de estilo e de tema (`public/app.js`):
 
 - **Zero rede.** As listas vivem no front-end (`STYLE_SUGGESTIONS` e `LYRIC_THEMES`); nenhum request é feito. É por isso que funciona offline e não gasta cota de API.
 - **Sem repetição.** `pickRandom(lista, valorAtual)` remove o valor que já está no campo antes de sortear — dois cliques seguidos **nunca** devolvem a mesma sugestão (verificado no teste, nos dois botões).
-- **Só o tema, nunca a letra.** O 💡 escreve uma linha única, sem tags de seção — o teste garante que a letra completa anterior é substituída pelo tema e que nenhuma chamada a `/api/lyrics` acontece nesse clique.
+- **Só o tema, nunca a letra.** A ✨ estrela escreve uma linha única, sem tags de seção — o teste garante que a letra completa anterior é substituída pelo tema e que nenhuma chamada a `/api/lyrics` acontece nesse clique.
 - **Blindagem (`temaCurto()`).** Antes de escrever no campo, o item sorteado passa por `temaCurto(texto)`: pula linhas que são só tag (`[Verse 1]`) e remove uma tag embutida no início (`[Chorus] amor na rua` → `amor na rua`). Mesmo que um item da lista venha errado (multiplas linhas / estrutura de música), o campo **nunca** recebe Verso/Refrão por este caminho — o teste injeta um item corrompido na lista e confere (seção 4.1 do `testar-varinha`).
 
-Regras da geração de letra (da varinha ✨, em `gerarLetra()`):
+Regras da geração de letra (da lâmpada 💡, em `gerarLetra()`):
 
 - **Seed nova por clique.** O gerador local deriva a seed do `hash(prompt)`; sem seed explícita, o **mesmo tema devolveria sempre a mesma letra**. Por isso o front manda `seed: Math.floor(Math.random() * 2**31)` a cada clique — mesma seed ainda dá a mesma letra (determinismo preservado).
 - **Estilo junto.** O texto de Estilos vai como `style`, então o gerador sabe o gênero ("Genero: …") sem precisar adivinhar.
@@ -476,16 +476,16 @@ Regras da geração de letra (da varinha ✨, em `gerarLetra()`):
 **Teste**
 
 ```bash
-npm run test:varinha                # navegador headless (Chromium), motor local, 32 verificações
+npm run test:varinha                # navegador headless (Chromium), motor local, 35 verificações
 ```
 
-O teste confere as duas listas (≥ 15 itens cada) e que **todos os temas da lista da 💡 são frases de 1 linha, sem `[tags]`**; que a varinha de **Estilos** preenche o campo com um item **da lista** sem repetir, que a animação `is-magic` dispara no campo e no botão, que os chips de gênero ficam desativados (prioridade do texto), que a varinha de **Letra** **gera** letra completa (com tags de seção) a partir do tema digitado — e que dois cliques com o mesmo tema dão letras diferentes —, que o botão **💡 só sorteia um tema** de 1 linha (item da lista, sem tags de seção, **sem chamar `/api/lyrics`**), que **dois cliques seguidos do 💡 não repetem o tema**, que depois dele a varinha ✨ **transforma aquele tema em letra completa**, que **um item corrompido na lista não vaza estrutura de música para o campo** (blindagem `temaCurto()`), que o bloco "Letra" é reaberto e que o layout **mobile** (390 px) segue sem overflow.
+O teste confere as duas listas (≥ 15 itens cada) e que **todos os temas da lista da ✨ são frases de 1 linha, sem `[tags]`**; que a varinha de **Estilos** preenche o campo com um item **da lista** sem repetir, que a animação `is-magic` dispara no campo e nos dois botões do bloco, que os chips de gênero ficam desativados (prioridade do texto), que a **💡 lâmpada gera** letra completa (com tags de seção) a partir do tema digitado — e que dois cliques com o mesmo tema dão letras diferentes —, que a **✨ estrela só sorteia um tema** de 1 linha (item da lista, sem tags de seção, **sem chamar `/api/lyrics`**), que **dois cliques seguidos dela não repetem o tema**, que depois a 💡 **transforma aquele tema em letra completa e é ela quem faz a chamada à API** (contagem de requests), que **um item corrompido na lista não vaza estrutura de música para o campo** (blindagem `temaCurto()`), que o bloco "Letra" é reaberto e que o layout **mobile** (390 px) segue sem overflow.
 
 ---
 
 ### 4.0.5 Tema no campo "Letra" vira letra completa antes de virar áudio
 
-O campo "Letra" aceita as duas coisas — a própria letra **ou** uma sugestão/tema (o placeholder diz "Escreva a letra de uma música **ou uma sugestão**", e a varinha escreve exatamente um tema ali). Mas **um tema não é uma letra**: era enviado ao motor como se fosse, e o resultado era a mesma frase cantada em todas as frases (medido: **16 frases idênticas** na mesma faixa).
+O campo "Letra" aceita as duas coisas — a própria letra **ou** uma sugestão/tema (o placeholder diz "Escreva a letra de uma música **ou uma sugestão**", e o botão ✨ escreve exatamente um tema ali). Mas **um tema não é uma letra**: era enviado ao motor como se fosse, e o resultado era a mesma frase cantada em todas as frases (medido: **16 frases idênticas** na mesma faixa).
 
 A correção fica em `server/lyrics.js` + `server/api.js`:
 
@@ -514,7 +514,7 @@ npm run test:letra                  # contrato + HTTP + navegador (Chromium), 37
 
 O app **não depende** do OpenRouter para gerar música: quem faz isso é o ACE-Step. O OpenRouter continua disponível em dois pontos:
 
-1. **Varinha ✨ do bloco Letra** (`POST /api/lyrics`, id `#btnLyricWand`) — usa `openai/gpt-4o-mini` quando há chave: ela manda o **tema do campo** e recebe a letra completa, com uma seed nova por clique (senão o gerador local devolveria sempre a mesma letra). O botão 💡 (`#btnLyricAI`) **não passa pela API**: ele só sorteia um tema da lista local (ver 4.0.4). Se a chamada da varinha falhar (sem chave, sem crédito 402, sem rede), a própria rota **cai no gerador local offline** e devolve 200 — nunca 502.
+1. **Lâmpada 💡 do bloco Letra** (`POST /api/lyrics`, id `#btnLyricAI`) — usa `openai/gpt-4o-mini` quando há chave: ela manda o **tema do campo** e recebe a letra completa, com uma seed nova por clique (senão o gerador local devolveria sempre a mesma letra). O botão ✨ (`#btnLyricWand`) **não passa pela API**: ele só sorteia um tema da lista local (ver 4.0.4). Se a chamada da 💡 falhar (sem chave, sem crédito 402, sem rede), a própria rota **cai no gerador local offline** e devolve 200 — nunca 502.
 2. **TTS** — só no motor local e **apenas** se você escolher "Voz por IA (OpenRouter)" na interface (ou `MUSICGPT_TTS_PROVIDER=openrouter`).
 
 Quando a chave está em `.env`:

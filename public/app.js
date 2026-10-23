@@ -419,8 +419,8 @@ const STYLE_SUGGESTIONS = [
 ];
 
 /**
- * Temas de LETRA (ideias curtas de 1 linha para a música). O botao ✦ do
- * bloco "Letra" sorteia um deles e escreve no campo; a varinha (✨) usa o
+ * Temas de LETRA (ideias curtas de 1 linha para a música). A estrela ✦ do
+ * bloco "Letra" sorteia um deles e escreve no campo; a lampada 💡 usa o
  * tema do campo (ou sorteia um desses, se o campo estiver vazio) como
  * semente da letra COMPLETA.
  */
@@ -1560,12 +1560,13 @@ function bind() {
   const novaSeed = () => Math.floor(Math.random() * 2 ** 31);
 
   /**
-   * Gerador da letra COMPLETA: usado pela varinha (✨) do bloco "Letra".
+   * Gerador da letra COMPLETA: usado pela lampada 💡 (#btnLyricAI), a
+   * UNICA porta de entrada do /api/lyrics no bloco "Letra".
    *
    * `tema` e o texto que vira semente da letra (o proprio campo "Letra").
    * O backend escreve a letra completa - com IA quando ha chave, senao com
-   * o gerador local - e devolve o texto. O botao ✦ NAO passa por aqui: ele
-   * so sorteia o tema (ver o listener dele logo abaixo).
+   * o gerador local - e devolve o texto. A estrela ✦ NAO passa por aqui:
+   * ela so sorteia o tema (ver o listener dela logo abaixo).
    */
   async function gerarLetra({ tema, btn }) {
     btn.classList.add('is-busy');
@@ -1586,11 +1587,15 @@ function bind() {
     }
   }
 
-  // varinha da letra: usa o TEXTO DO CAMPO como tema e pede a letra ao backend
-  $('#btnLyricWand').addEventListener('click', async () => {
+  /**
+   * LAMPADA 💡 do bloco "Letra": a unica que gera a letra COMPLETA.
+   *
+   * Usa o TEXTO DO CAMPO como tema (com texto no campo ele e o tema; vazio,
+   * a lampada sorteia um tema da lista antes) e pede a letra ao backend.
+   */
+  $('#btnLyricAI').addEventListener('click', async () => {
     const campo = $('#customLyrics');
-    const btn = $('#btnLyricWand');
-    // com texto no campo ele e o tema; vazio, a varinha sorteia um tema antes
+    const btn = $('#btnLyricAI');
     const tema = campo.value.trim() || pickRandom(LYRIC_THEMES);
     if (!tema) return;
     try {
@@ -1601,16 +1606,18 @@ function bind() {
   });
 
   /**
-   * Estrela/lampada do bloco "Letra" (✦): sorteia APENAS um tema curto -
-   * uma frase de 1 linha, ex.: "Uma música sobre a saudade da infância na
-   * praia" - e escreve no campo. NAO gera verso/refrao e NAO chama a API:
-   * a lista LYRIC_THEMES vive no front-end, entao funciona offline e nao
-   * gasta cota. Quem transforma o tema em letra completa e a varinha (✨)
-   * ao lado, unica dona do gerarLetra().
+   * ESTRELA ✦ do bloco "Letra" (ao lado direito da lampada): sorteia
+   * APENAS um tema curto - uma frase de 1 linha, ex.: "Uma música sobre a
+   * saudade da infância na praia" - e escreve no campo. NAO gera
+   * verso/refrao e NAO chama a API: a lista LYRIC_THEMES vive no
+   * front-end, entao funciona offline e nao gasta cota. Quem transforma o
+   * tema em letra completa e a lampada 💡 ao lado, unica dona do
+   * gerarLetra() (blindagem: temaCurto() corta qualquer estrutura de
+   * musica que um item da lista venha trazer).
    */
-  $('#btnLyricAI').addEventListener('click', () => {
+  $('#btnLyricWand').addEventListener('click', () => {
     const campo = $('#customLyrics');
-    const btn = $('#btnLyricAI');
+    const btn = $('#btnLyricWand');
     // lista local -> 1 linha curta (temaCurto garante que nunca vire letra)
     const tema = temaCurto(pickRandom(LYRIC_THEMES, campo.value.trim()));
     if (!tema) return;
@@ -1618,7 +1625,7 @@ function bind() {
     campo.dispatchEvent(new Event('input', { bubbles: true }));
     expandBlock('lyrics');
     magicEffect(campo, btn);
-    toast('Tema sorteado — a varinha ✨ transforma em letra completa.', 'ok');
+    toast('Tema sorteado — a 💡 transforma em letra completa.', 'ok');
     return tema;
   });
 
