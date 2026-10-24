@@ -353,36 +353,46 @@ function selectedGenre() {
  * ------------------------------------------------------------------ */
 
 /**
- * Descrições pré-definidas para cada gênero. Quando o usuário clicar em um
+ * Descrições ricas e detalhadas para cada gênero. Quando o usuário clicar em um
  * botão de gênero, o campo de texto 'Estilos' será preenchido automaticamente
- * com a descrição correspondente.
+ * com a descrição correspondente, incluindo instrumentação e características.
  */
 const GENRE_DESCRIPTIONS = {
-  pop: 'Pop',
-  mpb: 'MPB',
-  sertanejo: 'Sertanejo',
-  forro: 'Forró animado com sanfona e zabumba',
-  rock: 'Rock',
-  funk: 'Funk brasileiro',
-  samba: 'Samba',
-  jazz: 'Jazz',
-  reggae: 'Reggae',
-  eletronica: 'Eletrônica',
-  hiphop: 'Hip-Hop',
-  gospel: 'Gospel',
-  indie: 'Indie',
-  blues: 'Blues',
-  country: 'Country',
-  rnb: 'R&B',
-  soul: 'Soul',
-  bossa: 'Bossa Nova',
-  trap: 'Trap',
-  pagode: 'Pagode',
+  pop: 'Pop dançante com sintetizadores brilhantes e refrão chiclete',
+  mpb: 'MPB melancólica com violão, pandeiro e saxofone ao fundo',
+  sertanejo: 'Sertanejo universitário com viola, sanfona e batida em dois',
+  forro: 'Forró animado com sanfona, zabumba e triângulo',
+  trap: 'Trap pesado com 808 grave, hi-hats rápidos e sintetizadores escuros',
+  funk: 'Funk brasileiro com tambor, baixo elétrico e bordões gritando',
+  funk_br: 'Funk brasileiro com tambor, baixo elétrico e batida de baile',
+  rock: 'Rock energético com guitarra distorcida e bateria pesada',
+  rock_nacional: 'Rock nacional brasileiro com guitarra limpa e bateria marcante',
+  samba: 'Samba de roda animado com pandeiro, cavaquinho e surdo no refrão',
+  pagode: 'Pagode animado com cavaquinho, tantã e pandeiro',
+  lofi: 'Lo-fi chill com piano suave, chuva de fundo e textura de vinil',
+  house: 'House club com kick de quatro tempos, hi-hat e sintetizador pulsante',
+  gospel: 'Gospel soul com coro, piano e dinâmica crescente no refrão',
+  jazz: 'Jazz de madrugada com piano, contrabaixo e saxofone quente',
+  ambient: 'Ambient etéreo com pads atmosféricos e texturas flutuantes',
+  bossa: 'Bossa nova leve com violão de nylon e percussão discreta',
+  reggae: 'Reggae tranquilo com baixo round, skank no violão e melodia solta',
+  indie: 'Indie folk acústico com violão, bumbo leve e vozes em dupla',
+  blues: 'Blues melancólico com guitarra slide e harmônica chorosa',
+  soul: 'Soul groovy com baixo encorpado, Rhodes e vocais emotivos',
+  rnb: 'R&B neosoul com baixo encorpado, Rhodes e grooves relaxados',
+  country: 'Country americano com guitarra steel, banjo e harmônica',
+  eletronica: 'Eletrônica experimental com sintetizadores modulares e bateria programada',
+  hiphop: 'Hip-hop clássico com sample de vinil, MPC e scratch',
+  rockabilly: 'Rockabilly dos anos 50 com guitarra twang, contrabaixo e bateria scrub',
+  synthwave: 'Synthwave dos anos 80 com sintetizadores neon e bateria eletrônica',
+  kpop: 'K-pop animado com beat dance, sintetizadores brilhantes e refrão coreografado',
+  amapiano: 'Amapiano com piano log drum, percussão africana e melodia etérea',
+  baile: 'Funk de baile com tamborzão, grave 808 e MC fazendo bordão',
 };
 
 /**
  * Obtém a descrição de estilo para um gênero específico.
- * Retorna o label amigável do gênero ou uma versão capitalizada da chave.
+ * Retorna a descrição rica do dicionário ou uma versão capitalizada da chave como fallback.
  */
 function getGenreDescription(genreKey) {
   if (GENRE_DESCRIPTIONS[genreKey]) {
