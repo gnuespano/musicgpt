@@ -24,6 +24,7 @@ import {
   NVIDIA,
   OPENROUTER,
   PROVIDERS,
+  RATE_LIMIT,
   activeLyricsProvider,
   deepSeekAvailable,
   nvidiaAvailable,
@@ -224,7 +225,8 @@ export async function generateLyricsDeepSeek(temaOuOpts = {}, extra = {}) {
 
   if (deepSeekAvailable()) {
     try {
-      return await callDeepSeek(opts, tema);
+      await throttle('deepseek');
+      return await retryWithBackoff(() => callDeepSeek(opts, tema), 'deepseek');
     } catch (err) {
       motivos.push(`DeepSeek: ${primeiraLinha(err.message)}`);
       log(`DeepSeek fora (${motivos[motivos.length - 1]}) -> tentando o NVIDIA NIM`);
@@ -236,7 +238,8 @@ export async function generateLyricsDeepSeek(temaOuOpts = {}, extra = {}) {
   // fallback secundario: NVIDIA NIM (mesmo prompt, ver 4.1.1)
   if (nvidiaAvailable()) {
     try {
-      return await callNvidia(opts, tema);
+      await throttle('nvidia');
+      return await retryWithBackoff(() => callNvidia(opts, tema), 'nvidia');
     } catch (err) {
       motivos.push(`NVIDIA: ${primeiraLinha(err.message)}`);
       log(`NVIDIA fora (${motivos[motivos.length - 1]}) -> gerador local de templates`);
@@ -360,7 +363,8 @@ export async function generateLyricsNvidia(temaOuOpts = {}, extra = {}) {
     return localFallback(opts, 'tema vazio');
   }
   try {
-    return await callNvidia(opts, tema);
+    await throttle('nvidia');
+    return await retryWithBackoff(() => callNvidia(opts, tema), 'nvidia');
   } catch (err) {
     return localFallback(opts, `NVIDIA: ${primeiraLinha(err.message)}`);
   }
@@ -476,7 +480,8 @@ export async function generateMusicStyle() {
   // Tenta NVIDIA primeiro (se disponível)
   if (nvidiaAvailable()) {
     try {
-      const result = await callNvidiaForStyle();
+      await throttle('nvidia');
+      const result = await retryWithBackoff(() => callNvidiaForStyle(), 'nvidia');
       return { style: result, engine: 'nvidia' };
     } catch (err) {
       log(`NVIDIA fora para gerar estilo (${primeiraLinha(err.message)}) -> tentando DeepSeek`);
@@ -486,7 +491,8 @@ export async function generateMusicStyle() {
   // Fallback para DeepSeek (se disponível)
   if (deepSeekAvailable()) {
     try {
-      const result = await callDeepSeekForStyle();
+      await throttle('deepseek');
+      const result = await retryWithBackoff(() => callDeepSeekForStyle(), 'deepseek');
       return { style: result, engine: 'deepseek' };
     } catch (err) {
       log(`DeepSeek fora para gerar estilo (${primeiraLinha(err.message)}) -> usando lista local`);
@@ -592,4 +598,75 @@ async function callDeepSeekForStyle() {
   const clean = content.replace(/^["'`]+|["'`]+$/g, '').replace(/\.+$/, '').trim();
   log(`DeepSeek devolveu estilo: "${clean.slice(0, 60)}"`);
   return clean;
+}
+
+/* ---------------- Controle de Rate Limit e Retry ---------------- */
+
+/**
+ * Controle de throttle para evitar rate limit (429) da NVIDIA.
+ * Garante um intervalo mínimo entre chamadas consecutivas.
+ */
+const throttleState = {
+  nvidia: { lastCall: 0 },
+  deepseek: { lastCall: 0 },
+};
+
+/**
+ * Aguarda o intervalo mínimo desde a última chamada.
+ */
+async function throttle(provider) {
+  const config = RATE_LIMIT[provider];
+  const state = throttleState[provider];
+  if (!config || !state) return;
+  
+  const now = Date.now();
+  const elapsed = now - state.lastCall;
+  const remaining = config.throttleMs - elapsed;
+  
+  if (remaining > 0) {
+    log(`throttle: aguardando ${remaining}ms antes da próxima chamada ao ${provider}`);
+    await new Promise((resolve) => setTimeout(resolve, remaining));
+  }
+  
+  state.lastCall = Date.now();
+}
+
+/**
+ * Retry com backoff exponencial para recuperar de erros temporários (429, 5xx).
+ * Tenta até maxRetries vezes, esperando 2s, 4s, 8s... entre tentativas.
+ */
+async function retryWithBackoff(fn, provider = 'nvidia') {
+  const config = RATE_LIMIT[provider] || RATE_LIMIT.nvidia;
+  const {
+    maxRetries = 3,
+    initialRetryDelay = 2000,
+    maxRetryDelay = 16000,
+  } = config;
+  
+  const shouldRetry = (error) => {
+    // Retry em 429 (rate limit), 503 (service unavailable), timeout
+    const is429 = /429/.test(error.message);
+    const is5xx = /5\d{2}/.test(error.message);
+    const isTimeout = /timeout|aborted/i.test(error.message);
+    return is429 || is5xx || isTimeout;
+  };
+
+  let lastError;
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      return await fn();
+    } catch (error) {
+      lastError = error;
+      
+      if (attempt === maxRetries || !shouldRetry(error)) {
+        throw error;
+      }
+      
+      const delay = Math.min(initialRetryDelay * Math.pow(2, attempt), maxRetryDelay);
+      log(`tentativa ${attempt + 1}/${maxRetries + 1} falhou: ${primeiraLinha(error.message)} -> aguardando ${delay}ms`);
+      await new Promise((resolve) => setTimeout(resolve, delay));
+    }
+  }
+  
+  throw lastError;
 }

@@ -317,3 +317,24 @@ export function activeVoiceProvider() {
   if (mode === 'openrouter' && openRouterAvailable()) return 'openrouter';
   return 'procedural';
 }
+
+/**
+ * Configurações de Throttle e Retry para APIs.
+ *
+ * Throttle: intervalo mínimo entre chamadas consecutivas (evita 429 rate limit).
+ * Retry: número de tentativas com backoff exponencial (recupera de erros temporários).
+ */
+export const RATE_LIMIT = {
+  nvidia: {
+    throttleMs: Number(process.env.NVIDIA_THROTTLE_MS || 2000), // 2s entre chamadas
+    maxRetries: Number(process.env.NVIDIA_MAX_RETRIES || 3), // até 3 tentativas
+    initialRetryDelay: Number(process.env.NVIDIA_RETRY_DELAY || 2000), // 2s, 4s, 8s...
+    maxRetryDelay: Number(process.env.NVIDIA_MAX_RETRY_DELAY || 16000), // máx 16s
+  },
+  deepseek: {
+    throttleMs: Number(process.env.DEEPSEEK_THROTTLE_MS || 1000), // 1s entre chamadas
+    maxRetries: Number(process.env.DEEPSEEK_MAX_RETRIES || 3),
+    initialRetryDelay: Number(process.env.DEEPSEEK_RETRY_DELAY || 2000),
+    maxRetryDelay: Number(process.env.DEEPSEEK_MAX_RETRY_DELAY || 16000),
+  },
+};
