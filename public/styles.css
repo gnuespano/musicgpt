@@ -549,7 +549,11 @@ code { background: #0e0e15; border: 1px solid var(--line); border-radius: 5px; p
 }
 .icon-btn.wand:hover { filter: brightness(1.06); }
 .icon-btn.wand svg { width: 17px; height: 17px; }
-.icon-btn.wand.is-busy { opacity: .6; pointer-events: none; }
+.icon-btn.wand.is-busy { opacity: .6; pointer-events: none; box-shadow: none; background: #666; color: #999; }
+/* brilho neon quando a varinha esta livre (pronta para usar) */
+.icon-btn.wand.is-active { box-shadow: 0 0 10px #a855f7; }
+/* estado inicial da varinha (tambem com brilho neon sutil) */
+.icon-btn.wand { box-shadow: 0 4px 14px rgba(180, 108, 255, .28); }
 
 /* lampada 💡 ao lado da estrela: a UNICA que gera a letra COMPLETA
    (chama /api/lyrics) - por isso ela e a que usa is-busy durante a chamada */

@@ -480,26 +480,35 @@ export async function generateMusicStyle() {
   // Tenta NVIDIA primeiro (se disponível)
   if (nvidiaAvailable()) {
     try {
+      log('[estilo] tentando gerar com NVIDIA NIM');
       await throttle('nvidia');
       const result = await retryWithBackoff(() => callNvidiaForStyle(), 'nvidia');
+      log(`[estilo] NVIDIA gerou: "${result.slice(0, 60)}"`);
       return { style: result, engine: 'nvidia' };
     } catch (err) {
-      log(`NVIDIA fora para gerar estilo (${primeiraLinha(err.message)}) -> tentando DeepSeek`);
+      log(`[estilo] NVIDIA fora: ${primeiraLinha(err.message)} -> tentando DeepSeek`);
     }
+  } else {
+    log('[estilo] NVIDIA_API_KEY ausente, pulando para DeepSeek');
   }
 
   // Fallback para DeepSeek (se disponível)
   if (deepSeekAvailable()) {
     try {
+      log('[estilo] tentando gerar com DeepSeek');
       await throttle('deepseek');
       const result = await retryWithBackoff(() => callDeepSeekForStyle(), 'deepseek');
+      log(`[estilo] DeepSeek gerou: "${result.slice(0, 60)}"`);
       return { style: result, engine: 'deepseek' };
     } catch (err) {
-      log(`DeepSeek fora para gerar estilo (${primeiraLinha(err.message)}) -> usando lista local`);
+      log(`[estilo] DeepSeek fora: ${primeiraLinha(err.message)} -> usando lista local`);
     }
+  } else {
+    log('[estilo] DEEPSEEK_API_KEY ausente, usando lista local');
   }
 
   // Fallback final: lista local
+  log('[estilo] usando lista local (fallback)');
   const randomStyle = LOCAL_STYLE_SUGGESTIONS[
     Math.floor(Math.random() * LOCAL_STYLE_SUGGESTIONS.length)
   ];
@@ -512,7 +521,7 @@ export async function generateMusicStyle() {
 async function callNvidiaForStyle() {
   log('pedindo estilo musical ao NVIDIA NIM');
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 15000); // 15s timeout
+  const timer = setTimeout(() => controller.abort(), 8000); // 8s timeout (estilo e rapido)
   let res;
   try {
     res = await fetch(`${NVIDIA.baseURL}/chat/completions`, {
@@ -559,7 +568,7 @@ async function callNvidiaForStyle() {
 async function callDeepSeekForStyle() {
   log('pedindo estilo musical ao DeepSeek');
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 15000); // 15s timeout
+  const timer = setTimeout(() => controller.abort(), 8000); // 8s timeout
   let res;
   try {
     res = await fetch(`${DEEPSEEK.baseURL}/chat/completions`, {
@@ -633,12 +642,14 @@ async function throttle(provider) {
 
 /**
  * Retry com backoff exponencial para recuperar de erros temporários (429, 5xx).
- * Tenta até maxRetries vezes, esperando 2s, 4s, 8s... entre tentativas.
+ * Para estilo musical: usa menos tentativas para fallback rapido.
  */
 async function retryWithBackoff(fn, provider = 'nvidia') {
   const config = RATE_LIMIT[provider] || RATE_LIMIT.nvidia;
+  
+  // Para estilo: usa menos retries para nao travar a UI
+  const maxRetries = provider === 'nvidia' ? 1 : config.maxRetries;
   const {
-    maxRetries = 3,
     initialRetryDelay = 2000,
     maxRetryDelay = 16000,
   } = config;

@@ -708,8 +708,14 @@ export const handlers = {
   async generateStyle(_req, res) {
     try {
       const result = await generateMusicStyle();
-      return json(res, 200, { style: result.style, engine: result.engine });
+      console.log(`[API /api/generate-style] engine=${result.engine} style="${result.style.slice(0, 50)}"`);
+      return json(res, 200, { 
+        style: result.style, 
+        engine: result.engine,
+        fallback: result.fallback || null,
+      });
     } catch (error) {
+      console.error(`[API /api/generate-style] ERRO: ${error.message}`);
       // fallback absoluto: nunca quebra
       const LOCAL_STYLES = [
         'Rock alternativo dos anos 90 com guitarra distorcida e bateria seca',

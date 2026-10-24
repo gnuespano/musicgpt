@@ -1719,23 +1719,33 @@ function bind() {
     const campo = $('#prompt');
     const btn = $('#btnStyleWand');
     
-    // Estado de carregamento
+    // Estado de carregamento visual: remove brilho neon e adiciona is-busy
     btn.disabled = true;
+    btn.classList.remove('is-active'); // remove brilho neon quando livre
     btn.classList.add('is-busy');
     const originalTitle = btn.title;
-    btn.title = 'Gerando estilo criativo com IA...';
+    btn.title = 'Gerando estilo com IA...';
     
     try {
       const res = await api('/api/generate-style');
-      campo.value = res.style;
+      campo.value = res.style || '';
       syncStylePriority();
       magicEffect(campo, btn);
+      
+      // Adiciona brilho neon quando libera (pronta para usar)
+      btn.classList.add('is-active');
       
       // Informa qual engine gerou (IA ou local)
       const engineLabel = res.engine === 'nvidia' ? 'gerado pela NVIDIA'
         : res.engine === 'deepseek' ? 'gerado pelo DeepSeek'
         : 'sorteado localmente';
-      toast(`Estilo ${engineLabel} — ajuste como quiser.`, 'ok');
+      
+      // Se caiu no fallback local, mostra toast diferente
+      if (res.engine === 'local') {
+        toast('Estilo sorteado localmente', 'ok');
+      } else {
+        toast(`Estilo ${engineLabel}`, 'ok');
+      }
     } catch (err) {
       // Fallback local se a API falhar completamente
       const sugestao = pickRandom(STYLE_SUGGESTIONS, campo.value.trim());
@@ -1743,9 +1753,11 @@ function bind() {
         campo.value = sugestao;
         syncStylePriority();
         magicEffect(campo, btn);
-        toast('Estilo sorteado localmente — ajuste como quiser.', 'ok');
+        btn.classList.add('is-active'); // brilho neon quando libera
+        toast('Estilo sorteado localmente', 'ok');
       } else {
         toast('Erro ao gerar estilo. Tente novamente.', 'error');
+        btn.classList.add('is-active');
       }
     } finally {
       btn.disabled = false;
