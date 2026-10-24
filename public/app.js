@@ -349,6 +349,50 @@ function selectedGenre() {
 }
 
 /* ------------------------------------------------------------------ *
+ * Mapeamento de gêneros para descrições de estilo
+ * ------------------------------------------------------------------ */
+
+/**
+ * Descrições pré-definidas para cada gênero. Quando o usuário clicar em um
+ * botão de gênero, o campo de texto 'Estilos' será preenchido automaticamente
+ * com a descrição correspondente.
+ */
+const GENRE_DESCRIPTIONS = {
+  pop: 'Pop',
+  mpb: 'MPB',
+  sertanejo: 'Sertanejo',
+  forro: 'Forró animado com sanfona e zabumba',
+  rock: 'Rock',
+  funk: 'Funk brasileiro',
+  samba: 'Samba',
+  jazz: 'Jazz',
+  reggae: 'Reggae',
+  eletronica: 'Eletrônica',
+  hiphop: 'Hip-Hop',
+  gospel: 'Gospel',
+  indie: 'Indie',
+  blues: 'Blues',
+  country: 'Country',
+  rnb: 'R&B',
+  soul: 'Soul',
+  bossa: 'Bossa Nova',
+  trap: 'Trap',
+  pagode: 'Pagode',
+};
+
+/**
+ * Obtém a descrição de estilo para um gênero específico.
+ * Retorna o label amigável do gênero ou uma versão capitalizada da chave.
+ */
+function getGenreDescription(genreKey) {
+  if (GENRE_DESCRIPTIONS[genreKey]) {
+    return GENRE_DESCRIPTIONS[genreKey];
+  }
+  // fallback: capitaliza a primeira letra da chave
+  return genreKey.charAt(0).toUpperCase() + genreKey.slice(1);
+}
+
+/* ------------------------------------------------------------------ *
  * Prioridade do estilo: texto > botao de genero
  * ------------------------------------------------------------------ */
 
@@ -1525,10 +1569,20 @@ function bind() {
   $('#genreChips').addEventListener('click', (ev) => {
     const chip = ev.target.closest('.chip');
     if (!chip) return;
-    if (styleText()) {
-      toast('O texto de Estilos tem prioridade — os botões de gênero não serão usados.', 'info');
-      return;
+    
+    // Sincroniza o campo de texto 'Estilos' com o gênero clicado
+    const genreKey = chip.dataset.genre;
+    const genreDescription = getGenreDescription(genreKey);
+    const promptField = $('#prompt');
+    
+    // Preenche o campo de texto com a descrição do gênero
+    if (promptField) {
+      promptField.value = genreDescription;
+      // Dispara o evento input para atualizar a prioridade visual
+      promptField.dispatchEvent(new Event('input', { bubbles: true }));
     }
+    
+    // Marca os botões visuais
     $$('#genreChips .chip').forEach((c) => c.classList.remove('is-on'));
     chip.classList.add('is-on');
     state.touched.genre = true;
