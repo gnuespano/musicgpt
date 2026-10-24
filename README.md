@@ -204,13 +204,14 @@ A camada `server/providers/` alterna entre motor local e modelos remotos:
 | `replicate` | `REPLICATE_API_TOKEN` | Modelo padrão `minimax/music-01` (música com vocal). |
 | `fal` | `FAL_KEY` | Modelo padrão `fal-ai/minimax-music-01`. |
 | **`deepseek` (letras, padrão)** | `DEEPSEEK_API_KEY` | **Gerador de letras que substituiu o local de templates**: `deepseek-chat` em JSON mode (ver 4.1). |
+| **`nvidia` (letras, fallback)** | `NVIDIA_API_KEY` | **NVIDIA NIM** — provedor secundário de letras: quando o DeepSeek cai, o `openai/gpt-oss-20b` assume antes do gerador local (ver 4.1.1). |
 | `openai` (letras) | `OPENAI_API_KEY` | Letra completa via `gpt-4o-mini`. |
 
 A seleção é automática: **com `ACESTEP_API_KEY` o ACE-Step é o motor padrão** e, **com `DEEPSEEK_API_KEY`, o DeepSeek é o provedor de letras padrão**; sem chave (ou se a chamada remota falhar) o app cai nos geradores locais. Para forçar:
 
 ```bash
 MUSICGPT_MUSIC_PROVIDER=acestep     # ou local | replicate | fal
-MUSICGPT_LYRICS_PROVIDER=deepseek   # ou openrouter | openai | local
+MUSICGPT_LYRICS_PROVIDER=deepseek   # ou nvidia | openrouter | openai | local
 ```
 
 > O provider local **canta** de forma sintética (formantes). É um placeholder honesto de voz, não um vocal de modelo neural. Com o ACE-Step, a faixa passa a ter o **vocal real do modelo**, com o arranjo, a mixagem e a letra feitos pelo ACE-Step.
@@ -510,7 +511,7 @@ Garantias (todas verificadas pelo teste):
 ```bash
 npm run test:letra                  # tema -> letra completa no motor LOCAL (Chromium), 37 verificações
 npm run test:tema                   # contrato + HTTP (stub da API do ACE-Step), 24 verificações
-npm run test:deepseek               # contrato + HTTP (stub da API da DeepSeek), 13 verificações
+npm run test:deepseek               # contrato + HTTP + cadeia DeepSeek/NVIDIA/local, 23 verificações
 MUSICGPT_TESTE_LIVE=1 npm run test:tema   # gera de verdade e compara LM x template local
 MUSICGPT_TESTE_LIVE=1 npm run test:deepseek # letra de verdade via DeepSeek (chave do .env)
 ```
@@ -550,35 +551,92 @@ A chamada aparece no log do servidor (`server.log`):
 
 ### Fallbacks (o app nunca quebra)
 
+A cadeia de letras é **DeepSeek → NVIDIA NIM → gerador local de templates** (ver 4.1.1):
+
 | Falha | Comportamento |
 |---|---|
-| Sem `DEEPSEEK_API_KEY` | gerador local de templates (nem chama a API) |
-| Sem saldo (402), 5xx, timeout, rede | idem: o app segue no local e o log diz o motivo |
+| Sem `DEEPSEEK_API_KEY` | NVIDIA NIM (se houver `NVIDIA_API_KEY`), senão o gerador local |
+| Sem saldo (402), 5xx, timeout, rede | idem: o app tenta o NVIDIA e, se também falhar, segue no local — o log diz o motivo |
 | Resposta fora do esperado (JSON inválido, letra vazia) | idem |
-| Tema vazio (o usuário digitou a letra) | a letra escrita pelo usuário **não passa pelo DeepSeek** |
+| Tema vazio (o usuário digitou a letra) | a letra escrita pelo usuário **não passa por nenhum provedor** |
 
-Em todos os casos o resultado vem com `engine: 'local-templates'` (e o card de resultado avisa), então dá para saber de onde veio a letra.
+Em todos os casos o resultado vem com o `engine` de quem escreveu (`deepseek` \| `nvidia` \| `local-templates`) e, no fallback, o `fallback` com o(s) motivo(s), então dá para saber de onde veio a letra.
 
-**Rotulo no frontend.** A rota `POST /api/lyrics` devolve, junto da letra, o campo **`provider`** (`deepseek` | `openrouter` | `openai` | `local` — o `engine` cru também vai junto, mais `fallback` com o motivo quando houve queda). O toast da 💡 usa ele para dizer **"Letra gerada via DeepSeek"** ou **"Letra gerada localmente"** — e, no fallback, mostra o motivo na hora (ex.: "Letra gerada localmente (DeepSeek respondeu 402: Insufficient Balance)"), sem precisar abrir o log.
+**Rotulo no frontend.** A rota `POST /api/lyrics` devolve, junto da letra, o campo **`provider`** (`deepseek` | `nvidia` | `openrouter` | `openai` | `local` — o `engine` cru também vai junto, mais `fallback` com o motivo quando houve queda). O toast da 💡 usa ele para dizer **"Letra gerada via DeepSeek"**, **"Letra gerada via NVIDIA"** ou **"Letra gerada localmente"** — e, no fallback, mostra o motivo na hora (ex.: "Letra gerada localmente (DeepSeek: DeepSeek respondeu 402: Insufficient Balance | NVIDIA: NVIDIA_API_KEY ausente)"), sem precisar abrir o log.
 
 **Provedores de letra: a cadeia**
 
-`activeLyricsProvider()` (botão 💡) e `mainLyricsProvider()` (expansão de tema na geração) seguem, no modo `auto` (padrão): **deepseek → openrouter → openai → local**. `MUSICGPT_LYRICS_PROVIDER` força um (`=local` desliga tudo e deixa só templates — é o que os testes usam para não chamar API real).
+`activeLyricsProvider()` (botão 💡) e `mainLyricsProvider()` (expansão de tema na geração) seguem, no modo `auto` (padrão): **deepseek → nvidia → openrouter → openai → local**. `MUSICGPT_LYRICS_PROVIDER` força um (`=nvidia` fixa o NIM, `=local` desliga tudo e deixa só templates — é o que os testes usam para não chamar API real).
 
 **Teste**
 
 ```bash
-npm run test:deepseek                    # contrato + HTTP (stub da API da DeepSeek), 13 verificações
+npm run test:deepseek                    # contrato + HTTP + cadeia de fallback, 23 verificações
 MUSICGPT_TESTE_LIVE=1 npm run test:deepseek   # chamada real com a chave do .env
 ```
 
-O `test:deepseek` sobe um **stub** da API da DeepSeek (chave falsa + `DEEPSEEK_BASE_URL` local) e prova, sem gastar saldo, que: `/api/lyrics` e a expansão de tema usam `deepseek-chat` em **JSON mode** com o system prompt de compositor brasileiro e o tema no prompt; a letra extraída do JSON vira a faixa (`engine: deepseek`); 500 ou chave vazia ⇒ **gerador local** (`engine: local-templates`, app não quebra); letra escrita pelo usuário ⇒ não toca no DeepSeek. A camada live (opcional) gera letra de verdade e imprime o resultado.
+O `test:deepseek` sobe **stubs** da DeepSeek e do NVIDIA NIM (chaves falsas + `DEEPSEEK_BASE_URL`/`NVIDIA_BASE_URL` locais) e prova, sem gastar saldo, que: `/api/lyrics` e a expansão de tema usam `deepseek-chat` em **JSON mode** com o system prompt de compositor brasileiro e o tema no prompt; a letra extraída do JSON vira a faixa (`engine: deepseek`); DeepSeek 500 ⇒ **NVIDIA NIM assume** (`engine: nvidia`, mesmo system prompt, Bearer da `NVIDIA_API_KEY`); os dois 500 ou chave vazia ⇒ **gerador local** (`engine: local-templates`, app não quebra); letra escrita pelo usuário ⇒ não toca em nenhum provedor. A camada live (opcional) gera letra de verdade e imprime o resultado.
+
+---
+
+## 4.1.1 NVIDIA NIM (fallback do DeepSeek)
+
+Quando o DeepSeek falhar — sem saldo, 5xx, timeout, sem rede — em vez de ir direto pro gerador local, a cadeia tenta o **NVIDIA NIM** (`integrate.api.nvidia.com`) com o **mesmo system prompt** (compositor brasileiro, estrutura de `[Verso]`/`[Refrão]`) e o mesmo user prompt (tema + gênero). Só se os dois caírem o gerador local de templates assume.
+
+```bash
+# .env na raiz
+NVIDIA_API_KEY=nvapi-...           # https://build.nvidia.com
+# opcionais:
+#NVIDIA_MODEL=openai/gpt-oss-20b   # padrao (ver abaixo)
+#NVIDIA_BASE_URL=https://integrate.api.nvidia.com/v1
+#NVIDIA_TIMEOUT_MS=120000
+#NVIDIA_MAX_TOKENS=2500
+#MUSICGPT_LYRICS_PROVIDER=nvidia   # força o NIM como provedor (pula o DeepSeek)
+```
+
+### Como funciona (`server/providers/lyrics.js` → `generateLyricsNvidia`)
+
+`POST https://integrate.api.nvidia.com/v1/chat/completions` com:
+
+- **`model`**: `openai/gpt-oss-20b` (padrão);
+- **system prompt idêntico ao do DeepSeek** — compositor brasileiro, letra original em pt-BR com `[Verso 1]`, `[Refrão]`, `[Verso 2]`, `[Refrão]`, opcionalmente `[Ponte]`, e saída em JSON `{"letra": "..."}`;
+- **`Authorization: Bearer <NVIDIA_API_KEY>`**, `temperature: 0.9`, `max_tokens: 2500`, timeout de 120s;
+- **`reasoning_effort: 'low'`** (`NVIDIA_REASONING_EFFORT`): os modelos atuais do NIM são de raciocínio e gastam tokens em `reasoning_content` *antes* do conteúdo — com o esforço no mínimo o raciocínio cai de ~1600 chars para ~48, então os 2500 tokens sobram pra letra. Sem isso, o `gpt-oss-20b` **às vezes devolvia só raciocínio** (`content: null`) e a cadeia caía no local. Valores aceitos: `low` \| `medium` \| `high` (`minimal` é rejeitado pela API);
+- **sem `response_format`**: nem todo modelo do NIM aceita JSON mode, então o parser é defensivo (`parseLyricPayload`) — aceita JSON puro, JSON com cerca ```json e até a letra solta, o que o modelo devolver.
+
+### Por que `openai/gpt-oss-20b` como padrão
+
+Sonda feita com a **task real de letra** (mesmo prompt, `max_tokens: 4000`) em out/2026 — os modelos são **Free Endpoint** na NVIDIA:
+
+| Modelo | Tempo | Resultado |
+|---|---|---|
+| **`openai/gpt-oss-20b`** | **14,8s** | 942 chars, JSON válido ✅ |
+| `minimaxai/minimax-m3.1-flash` | 41,1s | 971 chars, JSON válido |
+| `stepfun-ai/step-5-preview` | 93,4s | 1175 chars, JSON válido |
+| `z-ai/glm-5.3` | 170,2s | **0 chars** (`finish=length`, só raciocínio) ❌ |
+
+Detalhes que a sonda revelou e que o código já trata:
+
+- os modelos `meta/llama-3.x-instruct` **saíram de circulação** (end of life em 2026-08-26 → HTTP 410) e `mistralai/mistral-large-2-instruct` **não está habilitado nesta conta** (HTTP 404 "Not found for account") — por isso o padrão não é nenhum dos dois;
+- os modelos atuais do NIM são de **raciocínio**: gastam tokens em `reasoning_content` *antes* do conteúdo. Com `max_tokens: 900` o `content` voltava `null` e a letra se perdia — por isso o padrão é **2500** (`NVIDIA_MAX_TOKENS`), e quando só vem raciocínio o erro diz explicitamente pra aumentar esse valor;
+- o timeout é de **120s** (`NVIDIA_TIMEOUT_MS`) porque as respostas variam de 15s a mais de 1 minuto.
+
+A chamada aparece no log do servidor:
+
+```text
+[letras] pedindo letra ao DeepSeek (deepseek-chat): "Uma musica sobre recomecar..."
+[letras] DeepSeek fora (DeepSeek: DeepSeek respondeu 502: ...) -> tentando o NVIDIA NIM
+[letras] pedindo letra ao NVIDIA NIM (openai/gpt-oss-20b): "Uma musica sobre recomecar..."
+[letras] NVIDIA devolveu a letra (812 chars)
+```
+
+A rota `/api/lyrics` responde com `engine: 'nvidia'` e `provider: 'nvidia'`, e o toast da 💡 mostra **"Letra gerada via NVIDIA"**.
 
 ---
 
 ## 4.2 IA real via OpenRouter (letra + voz) — opcional
 
-O app **não depende** do OpenRouter para gerar música: quem faz isso é o ACE-Step. No modo `auto`, a **letra já vem do DeepSeek (4.1)**; o OpenRouter fica como segunda opção da cadeia (`deepseek → openrouter → openai → local`) e continua disponível em dois pontos:
+O app **não depende** do OpenRouter para gerar música: quem faz isso é o ACE-Step. No modo `auto`, a **letra já vem do DeepSeek (4.1)**, com o **NVIDIA NIM (4.1.1) como fallback**; o OpenRouter fica depois na cadeia (`deepseek → nvidia → openrouter → openai → local`) e continua disponível em dois pontos:
 
 1. **Lâmpada 💡 do bloco Letra** (`POST /api/lyrics`, id `#btnLyricAI`) — usa o DeepSeek com `DEEPSEEK_API_KEY` e, na ausência dela, `openai/gpt-4o-mini` do OpenRouter quando há chave: ela manda o **tema do campo** e recebe a letra completa, com uma seed nova por clique (senão o gerador local devolveria sempre a mesma letra). O botão ✨ (`#btnLyricWand`) **não passa pela API**: ele só sorteia um tema da lista local (ver 4.0.4). Se a chamada da 💡 falhar (sem chave, sem crédito 402, sem rede), a própria rota **cai no gerador local offline** e devolve 200 — nunca 502.
 2. **TTS** — só no motor local e **apenas** se você escolher "Voz por IA (OpenRouter)" na interface (ou `MUSICGPT_TTS_PROVIDER=openrouter`).

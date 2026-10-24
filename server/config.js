@@ -54,7 +54,7 @@ export const PROVIDERS = {
     },
   },
   lyrics: {
-    mode: process.env.MUSICGPT_LYRICS_PROVIDER || 'auto', // auto | deepseek | openrouter | openai | local
+    mode: process.env.MUSICGPT_LYRICS_PROVIDER || 'auto', // auto | deepseek | nvidia | openrouter | openai | local
     openai: {
       key: process.env.OPENAI_API_KEY || '',
       model: process.env.MUSICGPT_OPENAI_MODEL || 'gpt-4o-mini',
@@ -210,6 +210,48 @@ export function deepSeekAvailable() {
   return key.length >= 12;
 }
 
+/**
+ * NVIDIA NIM: provedor de LETRAS SECUNDARIO (fallback do DeepSeek).
+ * API compativel com a da OpenAI:
+ *   POST https://integrate.api.nvidia.com/v1/chat/completions
+ *     -> { model: "openai/gpt-oss-20b", messages }
+ *     <- choices[0].message.content = '{"letra": "[Verso 1]\\n..."}'
+ *
+ * A cadeia de letras ficou: DeepSeek -> NVIDIA NIM -> gerador local de
+ * templates. O NVIDIA so entra quando o DeepSeek falha (sem chave, rede,
+ * saldo, 5xx) - ou quando e forcado via MUSICGPT_LYRICS_PROVIDER=nvidia.
+ *
+ * Chave: https://build.nvidia.com -> NVIDIA_API_KEY no .env
+ * (ver README 4.1.1: sonda dos modelos Free Endpoint e por que o padrao
+ * e o openai/gpt-oss-20b)
+ */
+export const NVIDIA = {
+  apiKey: (process.env.NVIDIA_API_KEY || '').trim(),
+  baseURL: (process.env.NVIDIA_BASE_URL || 'https://integrate.api.nvidia.com/v1').replace(/\/+$/, ''),
+  /**
+   * Modelo padrao: `openai/gpt-oss-20b` foi o mais rapido da sonda com a
+   * task de letra (14,8s vs 41s do MiniMax e 93s do Step-5) e o unico que
+   * devolveu JSON valido rapido. Os modelos `meta/llama-3.x-instruct`
+   * sairam de circulacao (end of life em 2026-08-26) e os `mistral-large`
+   * nao estao habilitados nesta conta (404).
+   */
+  model: (process.env.NVIDIA_MODEL || 'openai/gpt-oss-20b').trim(),
+  /**
+   * Timeout generoso: os modelos atuais do NIM sao de raciocinio e levam
+   * 20-60s por resposta (medido: 42s com GLM-5.3, 20s com MiniMax). O NIM
+   * e o fallback do DeepSeek, entao vale esperar mais um pouco antes de
+   * desistir e cair no gerador local.
+   */
+  timeoutMs: Number(process.env.NVIDIA_TIMEOUT_MS || 120000),
+};
+
+/** O NVIDIA NIM esta pronto para uso? */
+export function nvidiaAvailable() {
+  const key = NVIDIA.apiKey.toLowerCase();
+  if (PLACEHOLDER_VALUES.has(key)) return false;
+  return key.length >= 12;
+}
+
 export function activeMusicProvider() {
   const { mode, replicate, fal } = PROVIDERS.music;
   if (mode === 'local') return 'local';
@@ -227,11 +269,14 @@ export function activeLyricsProvider() {
   const { mode, openai } = PROVIDERS.lyrics;
   if (mode === 'local') return 'local';
   if (mode === 'deepseek') return deepSeekAvailable() ? 'deepseek' : 'local';
+  if (mode === 'nvidia') return nvidiaAvailable() ? 'nvidia' : 'local';
   if (mode === 'openrouter' && openRouterAvailable()) return 'openrouter';
   if (mode === 'openai' && openai.key) return 'openai';
   // auto: o DeepSeek e o gerador de letras padrao quando ha chave - ele
-  // substitui o gerador local de templates (que vira o fallback)
+  // substitui o gerador local de templates (que vira o fallback). O NVIDIA
+  // NIM e a segunda opcao da cadeia (e tambem o fallback do DeepSeek).
   if (deepSeekAvailable()) return 'deepseek';
+  if (nvidiaAvailable()) return 'nvidia';
   if (openRouterAvailable()) return 'openrouter';
   if (openai.key) return 'openai';
   return 'local';
@@ -251,9 +296,13 @@ export function mainLyricsProvider() {
   const { mode } = PROVIDERS.lyrics;
   if (mode === 'openrouter' && openRouterAvailable()) return 'openrouter';
   if (mode === 'openai' && PROVIDERS.lyrics.openai.key) return 'openai';
+  if (mode === 'nvidia' && nvidiaAvailable()) return 'nvidia';
   if (mode === 'local') return 'local';
-  // auto (ou deepseek explicito): DeepSeek substitui o gerador local
-  return deepSeekAvailable() ? 'deepseek' : 'local';
+  // auto (ou deepseek explicito): DeepSeek substitui o gerador local e, se
+  // ele cair, a cadeia do proprio DeepSeek tenta o NVIDIA NIM antes do
+  // local. Sem chave do DeepSeek mas com a do NVIDIA, ja entra no NVIDIA.
+  if (deepSeekAvailable()) return 'deepseek';
+  return nvidiaAvailable() ? 'nvidia' : 'local';
 }
 
 /**

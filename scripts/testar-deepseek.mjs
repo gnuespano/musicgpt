@@ -1,10 +1,12 @@
 /**
- * Teste do DeepSeek como gerador de letras (substitui o local de templates).
+ * Teste do DeepSeek como gerador de letras (substitui o local de templates)
+ * e do NVIDIA NIM como fallback secundario dele.
  *
  * Regra testada: com DEEPSEEK_API_KEY configurada, a rota /api/lyrics e a
  * expansao de tema da geracao principal usam `POST /chat/completions`
  * (modelo deepseek-chat, response_format json_object) e extraem so a
- * letra do JSON. Sem chave ou se a chamada falhar, o GERADOR LOCAL de
+ * letra do JSON. Se o DeepSeek falhar, o NVIDIA NIM assume (mesmo system
+ * prompt, sem JSON mode); se os dois falharem, o GERADOR LOCAL de
  * templates assume - o app nunca quebra.
  *
  * Camadas:
@@ -12,13 +14,16 @@
  *             contrato (model, json mode, system prompt de compositor
  *             brasileiro, tema no prompt) e o fallback (stub 500 / sem
  *             chave -> engine local-templates).
- *  2. Live  - opcional (MUSICGPT_TESTE_LIVE=1): chamada real com a chave
+ *  2. HTTP  - stubs DeepSeek + NVIDIA provam a cadeia: DeepSeek 500 ->
+ *             NVIDIA responde (engine nvidia); os dois 500 -> local;
+ *             so NVIDIA -> provedor nvidia no modo auto.
+ *  3. Live  - opcional (MUSICGPT_TESTE_LIVE=1): chamada real com a chave
  *             do .env e a letra devolvida impressa.
  *
  * Uso:
  *   node scripts/testar-deepseek.mjs
  *   MUSICGPT_TESTE_LIVE=1 node scripts/testar-deepseek.mjs
- *     (chama a API da DeepSeek de verdade)
+ *     (chama a API da DeepSeek/NVIDIA de verdade)
  */
 
 import 'dotenv/config';
@@ -52,6 +57,16 @@ const LETRA_DEEPSEEK = [
   'Refrao dois da letra vinda do stub',
 ].join('\n');
 
+/** Letra distinta do stub do NVIDIA, para provar QUEM escreveu. */
+const LETRA_NVIDIA = [
+  '[Verso 1]',
+  'Linha um da letra do NVIDIA NIM (stub)',
+  'Linha dois da letra do NVIDIA NIM (stub)',
+  '',
+  '[Refrao]',
+  'Refrao do NVIDIA NIM (stub)',
+].join('\n');
+
 /* ------------------------------------------------------------------ *
  * Helpers
  * ------------------------------------------------------------------ */
@@ -69,11 +84,11 @@ async function freePort() {
 }
 
 /**
- * Stub da API da DeepSeek (chat/completions): guarda o corpo de cada
- * pedido e devolve {"letra": ...} - ou 500 quando o prompt contem FALHAR
+ * Stub da API (DeepSeek ou NVIDIA NIM): guarda o corpo de cada pedido e
+ * devolve {"letra": ...} - ou 500 quando o prompt contem o `falhar`
  * (para exercitar o fallback sem reiniciar o stub).
  */
-async function startStub() {
+async function startStub({ letra = LETRA_DEEPSEEK, falhar = 'FALHAR', id = 'stub' } = {}) {
   const port = await freePort();
   const pedidos = [];
   const server = http.createServer((req, res) => {
@@ -82,21 +97,21 @@ async function startStub() {
     req.on('end', () => {
       if (req.method === 'POST' && req.url.endsWith('/chat/completions')) {
         const body = JSON.parse(raw);
-        pedidos.push(body);
+        pedidos.push({ body, headers: req.headers });
         const user = (body.messages || []).find((m) => m.role === 'user')?.content || '';
-        if (user.includes('FALHAR')) {
+        if (falhar && user.includes(falhar)) {
           res.writeHead(500, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ error: { message: 'saldo insuficiente (stub)' } }));
           return;
         }
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({
-          id: 'stub-deepseek',
+          id,
           model: body.model,
           choices: [{
             message: {
               role: 'assistant',
-              content: JSON.stringify({ letra: LETRA_DEEPSEEK }),
+              content: JSON.stringify({ letra }),
             },
           }],
         }));
@@ -110,7 +125,8 @@ async function startStub() {
   return {
     port,
     pedidos,
-    last: () => pedidos[pedidos.length - 1],
+    last: () => pedidos[pedidos.length - 1]?.body,
+    lastHeaders: () => pedidos[pedidos.length - 1]?.headers,
     close: () => new Promise((r) => server.close(r)),
   };
 }
@@ -126,6 +142,10 @@ async function startServer(env = {}) {
       PORT: String(port),
       HOST: '127.0.0.1',
       MUSICGPT_DATA_DIR: dataDir,
+      // por padrao o NVIDIA fica DESLIGADO nos testes de stub: sem isso a
+      // chave real do .env seria herdada e a cadeia chamaria a API de
+      // verdade. Cada secao liga de proposito quando quer testar o NIM.
+      NVIDIA_API_KEY: '',
       ...env,
     },
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -269,18 +289,104 @@ try {
 }
 
 /* ------------------------------------------------------------------ *
- * 2. Live (opcional): chamada real com a chave do .env
+ * 2. HTTP: cadeia de fallback DeepSeek -> NVIDIA NIM -> local
+ * ------------------------------------------------------------------ */
+
+const stubNvidia = await startStub({ letra: LETRA_NVIDIA, falhar: 'FALHAR_NVIDIA', id: 'stub-nvidia' });
+const stubDeepSeekCadeia = await startStub({ id: 'stub-deepseek-cadeia' });
+const cadeia = await startServer({
+  MUSICGPT_MUSIC_PROVIDER: 'local',
+  MUSICGPT_LYRICS_PROVIDER: 'deepseek',
+  DEEPSEEK_API_KEY: 'stub-chave-123456',
+  DEEPSEEK_BASE_URL: `http://127.0.0.1:${stubDeepSeekCadeia.port}`,
+  NVIDIA_API_KEY: 'nvapi-stub-123456',
+  NVIDIA_BASE_URL: `http://127.0.0.1:${stubNvidia.port}`,
+});
+
+try {
+  const health = await (await fetch(`${cadeia.url}/api/health`)).json();
+  check('cadeia: o health continua reportando o DeepSeek como provedor (NVIDIA e so fallback)',
+    health.lyricsProvider === 'deepseek' && health.mainLyricsProvider === 'deepseek',
+    JSON.stringify({ lyrics: health.lyricsProvider, main: health.mainLyricsProvider }));
+
+  // 2a. DeepSeek ok -> ele responde e o NVIDIA NIM NEM e chamado
+  const antesNvidia = stubNvidia.pedidos.length;
+  const letraOk = await pedirLetra(cadeia.url, { prompt: TEMA, lang: 'pt' });
+  check('cadeia: DeepSeek responde -> letra do DeepSeek, NVIDIA NIM nao e chamado',
+    letraOk.text === LETRA_DEEPSEEK && letraOk.engine === 'deepseek'
+    && stubNvidia.pedidos.length === antesNvidia,
+    JSON.stringify({ engine: letraOk.engine, chamadas_nvidia: stubNvidia.pedidos.length - antesNvidia }));
+
+  // 2b. DeepSeek 500 -> NVIDIA NIM assume (engine nvidia, letra do NIM)
+  const letraNvidia = await pedirLetra(cadeia.url, { prompt: `FALHAR ${TEMA}`, lang: 'pt' });
+  check('cadeia: DeepSeek 500 -> NVIDIA NIM assume (engine nvidia, provider nvidia)',
+    letraNvidia.text === LETRA_NVIDIA && letraNvidia.engine === 'nvidia'
+    && letraNvidia.provider === 'nvidia' && !letraNvidia.fallback,
+    JSON.stringify({ engine: letraNvidia.engine, provider: letraNvidia.provider, texto: String(letraNvidia.text).slice(0, 40) }));
+  const pedidoNvidia = stubNvidia.last();
+  check('cadeia: o pedido ao NIM usa o modelo padrao (openai/gpt-oss-20b, o mais rapido da sonda)',
+    pedidoNvidia.model === 'openai/gpt-oss-20b',
+    String(pedidoNvidia.model));
+  const systemNvidia = String(pedidoNvidia.messages?.[0]?.content || '');
+  check('cadeia: o NIM recebe o MESMO system prompt do DeepSeek (compositor brasileiro + [Verso]/[Refrao])',
+    systemNvidia === String(stubDeepSeekCadeia.last()?.messages?.[0]?.content || '')
+    && /compositor/i.test(systemNvidia) && systemNvidia.includes('[Verso') && systemNvidia.includes('[Refrao'),
+    JSON.stringify(systemNvidia.slice(0, 60)));
+  check('cadeia: a chamada ao NIM autentica com Bearer da NVIDIA_API_KEY',
+    /bearer\s+nvapi-stub/i.test(String(stubNvidia.lastHeaders()?.authorization || '')),
+    String(stubNvidia.lastHeaders()?.authorization).slice(0, 20));
+  const userNvidia = String(pedidoNvidia.messages?.find((m) => m.role === 'user')?.content || '');
+  check('cadeia: o tema tambem vai no prompt do usuario do NIM',
+    userNvidia.includes(TEMA), JSON.stringify(userNvidia.slice(0, 60)));
+
+  // 2c. os dois caem -> gerador local (o app nunca quebra)
+  const letraLocal = await pedirLetra(cadeia.url, { prompt: `FALHAR_NVIDIA ${TEMA}`, lang: 'pt' });
+  check('cadeia: DeepSeek 500 + NVIDIA 500 -> gerador local (engine local-templates, com os motivos)',
+    letraLocal.engine === 'local-templates' && letraLocal.provider === 'local'
+    && /DeepSeek/.test(letraLocal.fallback || '') && /NVIDIA/.test(letraLocal.fallback || '')
+    && /\[[A-Za-z]/.test(letraLocal.text || ''),
+    JSON.stringify({ engine: letraLocal.engine, fallback: letraLocal.fallback }));
+
+  // 2d. so o NVIDIA tem chave -> no modo auto ele e o provedor (sem DeepSeek)
+  const soNvidia = await startServer({
+    MUSICGPT_MUSIC_PROVIDER: 'local',
+    DEEPSEEK_API_KEY: '',
+    NVIDIA_API_KEY: 'nvapi-stub-123456',
+    NVIDIA_BASE_URL: `http://127.0.0.1:${stubNvidia.port}`,
+  });
+  try {
+    const healthNvidia = await (await fetch(`${soNvidia.url}/api/health`)).json();
+    check('cadeia: sem DeepSeek e com NVIDIA -> provedor de letras nvidia no modo auto',
+      healthNvidia.lyricsProvider === 'nvidia' && healthNvidia.mainLyricsProvider === 'nvidia',
+      JSON.stringify({ lyrics: healthNvidia.lyricsProvider, main: healthNvidia.mainLyricsProvider }));
+    const letraSoNvidia = await pedirLetra(soNvidia.url, { prompt: TEMA, lang: 'pt' });
+    check('cadeia: /api/lyrics devolve a letra do NIM (engine nvidia)',
+      letraSoNvidia.text === LETRA_NVIDIA && letraSoNvidia.engine === 'nvidia',
+      JSON.stringify({ engine: letraSoNvidia.engine, texto: String(letraSoNvidia.text).slice(0, 40) }));
+  } finally {
+    soNvidia.child.kill('SIGKILL');
+    fs.rmSync(soNvidia.dataDir, { recursive: true, force: true, maxAttempts: 3 });
+  }
+} finally {
+  cadeia.child.kill('SIGKILL');
+  fs.rmSync(cadeia.dataDir, { recursive: true, force: true, maxAttempts: 3 });
+  await stubNvidia.close();
+  await stubDeepSeekCadeia.close();
+}
+
+/* ------------------------------------------------------------------ *
+ * 3. Live (opcional): chamada real com a chave do .env
  * ------------------------------------------------------------------ */
 
 if (LIVE) {
   const { generateLyricsDeepSeek } = await import('../server/providers/lyrics.js');
   const resultado = await generateLyricsDeepSeek(TEMA);
-  console.log('\n===== DeepSeek ao vivo =====');
+  console.log('\n===== cadeia DeepSeek/NVIDIA ao vivo =====');
   console.log(`engine: ${resultado.engine}${resultado.model ? ` (${resultado.model})` : ''}`);
   if (resultado.fallback) console.log(`fallback: ${resultado.fallback}`);
   console.log(`\n${resultado.text}\n`);
-  check('live: a letra veio do DeepSeek (nao do fallback local)',
-    resultado.engine === 'deepseek' && resultado.text !== undefined,
+  check('live: a letra veio de um provedor de IA (nao do fallback local)',
+    ['deepseek', 'nvidia'].includes(resultado.engine) && resultado.text !== undefined,
     String(resultado.engine + (resultado.fallback ? ` | ${resultado.fallback}` : '')));
   check('live: a letra tem estrutura de [Verso]/[Refrao]',
     /\[.*[Vv]erso/.test(resultado.text) && /\[.*[Rr]efr/.test(resultado.text),

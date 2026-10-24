@@ -63,11 +63,12 @@ function toast(message, type = 'info') {
 function labelLetra(res) {
   const provedor = res?.provider || res?.engine || '';
   const base = provedor === 'deepseek' ? 'Letra gerada via DeepSeek'
-    : provedor === 'openrouter' ? 'Letra gerada via OpenRouter'
-    : provedor === 'openai' ? 'Letra gerada via OpenAI'
-      : provedor === 'acestep-lm' ? 'Letra escrita pelo ACE-Step'
-        : (provedor === 'local' || provedor === 'local-templates') ? 'Letra gerada localmente'
-          : 'Letra criada';
+    : provedor === 'nvidia' ? 'Letra gerada via NVIDIA'
+      : provedor === 'openrouter' ? 'Letra gerada via OpenRouter'
+        : provedor === 'openai' ? 'Letra gerada via OpenAI'
+          : provedor === 'acestep-lm' ? 'Letra escrita pelo ACE-Step'
+            : (provedor === 'local' || provedor === 'local-templates') ? 'Letra gerada localmente'
+              : 'Letra criada';
   const motivo = res?.fallback
     ? ` (${String(res.fallback).replace(/\s*\(request_id:[^)]*\)/, '')})`
     : '';
