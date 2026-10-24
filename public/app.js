@@ -1714,15 +1714,44 @@ function bind() {
     return tema;
   });
 
-  // varinha de estilo: sorteia uma descricao de estilo aleatoria
-  $('#btnStyleWand').addEventListener('click', () => {
+  // varinha de estilo: gera uma descricao criativa usando IA (NVIDIA/DeepSeek)
+  $('#btnStyleWand').addEventListener('click', async () => {
     const campo = $('#prompt');
-    const sugestao = pickRandom(STYLE_SUGGESTIONS, campo.value.trim());
-    if (!sugestao) return;
-    campo.value = sugestao;
-    syncStylePriority();
-    magicEffect(campo, $('#btnStyleWand'));
-    toast('Estilo sorteado — ajuste como quiser.', 'ok');
+    const btn = $('#btnStyleWand');
+    
+    // Estado de carregamento
+    btn.disabled = true;
+    btn.classList.add('is-busy');
+    const originalTitle = btn.title;
+    btn.title = 'Gerando estilo criativo com IA...';
+    
+    try {
+      const res = await api('/api/generate-style');
+      campo.value = res.style;
+      syncStylePriority();
+      magicEffect(campo, btn);
+      
+      // Informa qual engine gerou (IA ou local)
+      const engineLabel = res.engine === 'nvidia' ? 'gerado pela NVIDIA'
+        : res.engine === 'deepseek' ? 'gerado pelo DeepSeek'
+        : 'sorteado localmente';
+      toast(`Estilo ${engineLabel} — ajuste como quiser.`, 'ok');
+    } catch (err) {
+      // Fallback local se a API falhar completamente
+      const sugestao = pickRandom(STYLE_SUGGESTIONS, campo.value.trim());
+      if (sugestao) {
+        campo.value = sugestao;
+        syncStylePriority();
+        magicEffect(campo, btn);
+        toast('Estilo sorteado localmente — ajuste como quiser.', 'ok');
+      } else {
+        toast('Erro ao gerar estilo. Tente novamente.', 'error');
+      }
+    } finally {
+      btn.disabled = false;
+      btn.classList.remove('is-busy');
+      btn.title = originalTitle;
+    }
   });
 
   // "+ Voz": escolhe o motor e a voz

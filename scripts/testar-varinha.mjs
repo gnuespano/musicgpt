@@ -147,10 +147,18 @@ try {
 
   await limpaToasts(browser.cdp);
   await realClick(browser.cdp, '#btnStyleWand');
+  
+  // Espera a API responder (a varinha agora é assíncrona e chama /api/generate-style)
+  // Aguarda até o campo ser preenchido ou timeout
+  let estilo1 = '';
+  for (let i = 0; i < 40; i++) {
+    await delay(250);
+    estilo1 = await browser.cdp.eval(`(() => document.querySelector('#prompt').value.trim())`);
+    if (estilo1.length > 10) break;
+  }
 
-  const estilo1 = await browser.cdp.eval(`(() => document.querySelector('#prompt').value.trim())`);
   check('a varinha de Estilos preenche o campo com uma sugestao valida',
-    listas.estilos.includes(estilo1), JSON.stringify(estilo1));
+    estilo1.length > 10 && /[a-záéíóú]/i.test(estilo1), JSON.stringify(estilo1));
 
   const visual1 = await browser.cdp.eval(`(() => ({
     magic: window.__magic,
@@ -167,11 +175,22 @@ try {
 
   await limpaToasts(browser.cdp);
   await realClick(browser.cdp, '#btnStyleWand');
-  const estilo2 = await browser.cdp.eval(`(() => document.querySelector('#prompt').value.trim())`);
+  
+  // Aguarda o segundo clique
+  let estilo2 = '';
+  for (let i = 0; i < 40; i++) {
+    await delay(250);
+    const current = await browser.cdp.eval(`(() => document.querySelector('#prompt').value.trim())`);
+    if (current !== estilo1 && current.length > 10) {
+      estilo2 = current;
+      break;
+    }
+  }
+  
   check('dois cliques seguidos nao repetem o mesmo estilo',
     estilo1 !== estilo2, `${JSON.stringify(estilo1)} vs ${JSON.stringify(estilo2)}`);
   check('o segundo clique tambem traz uma sugestao valida',
-    listas.estilos.includes(estilo2), JSON.stringify(estilo2));
+    estilo2.length > 10 && /[a-záéíóú]/i.test(estilo2), JSON.stringify(estilo2));
 
   /* ---------------------------------------------------------------- *
    * 3. Lampada 💡 de "Letra": usa o tema do campo e GERA a letra

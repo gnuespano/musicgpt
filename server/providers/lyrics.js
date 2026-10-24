@@ -422,3 +422,174 @@ export function cleanLyric(text) {
     .replace(/^(letra|lyric|titulo|título)\s*:.*$/gim, '')
     .trim();
 }
+
+/* ---------------- Geração de Estilos Musicais ---------------- */
+
+/**
+ * Prompt para gerar descrições criativas de estilos musicais.
+ */
+const STYLE_SYSTEM_PROMPT = 'Você é um especialista em música e estilos musicais. '
+  + 'Gere descrições criativas e detalhadas de estilos musicais em português do Brasil, '
+  + 'incluindo instrumentação característica e elementos sonoros. '
+  + 'A descrição deve ter entre 8 e 15 palavras.';
+
+const STYLE_USER_PROMPT = 'Gere uma descrição curta e criativa de um estilo musical em português do Brasil. '
+  + 'Responda APENAS com a descrição, sem aspas, sem explicações, sem introdução. '
+  + 'Exemplos: "Rock alternativo dos anos 90 com guitarra distorcida e bateria seca", '
+  + '"Lo-fi chill com piano suave, chuva de fundo e textura de vinil", '
+  + '"Trap pesado com 808 grave, hi-hats rápidos e sintetizadores escuros". '
+  + 'Agora gere uma nova descrição criativa e original:';
+
+/**
+ * Lista de estilos locais para fallback (mesma usada no frontend).
+ */
+const LOCAL_STYLE_SUGGESTIONS = [
+  'Rock alternativo dos anos 90 com guitarra distorcida e bateria seca',
+  'Lo-fi chill com piano suave, chuva de fundo e textura de vinil',
+  'Trap pesado com 808 grave, hi-hats rápidos e sintetizadores escuros',
+  'MPB melancólica com violão, pandeiro e saxofone ao fundo',
+  'Synthwave dos anos 80 com sintetizadores neon e bateria eletrônica',
+  'Samba de roda animado com pandeiro, cavaquinho e surdo no refrão',
+  'Funk brasileiro com tambor, baixo elétrico e bordões gritando',
+  'Pop dance dos anos 2000 com sintetizadores brilhantes e refrão grudento',
+  'Jazz de madrugada com piano, contrabaixo e saxofone quente',
+  'Bossa nova leve com violão de nylon e percussão discreta',
+  'Reggae tranquilo com baixo round, skank no violão e melodia solta',
+  'Rock progressivo com guitarra limpa, sintetizadores e solos longos',
+  'Forró de vaqueiro com sanfona, triângulo e bateria de baile',
+  'Gospel soul com coro, piano e dinâmica crescente no refrão',
+  'Indie folk acústico com violão, bumbo leve e vozes em dupla',
+  'House club com kick de quatro tempos, hi-hat e sintetizador pulsante',
+  'Balada de piano com cordas orquestrais e refrão em tom menor',
+  'K-pop animado com beat dance, sintetizadores brilhantes e refrão coreografado',
+  'R&B neosoul com baixo encorpado, Rhodes e grooves relaxados',
+  'Rockabilly dos anos 50 com guitarra twang, contrabaixo e bateria scrub',
+  'Amapiano com piano log drum, percussão africana e melodia etérea',
+  'Sertanejo universitário com viola, sanfona e batida em dois',
+];
+
+/**
+ * Gera um estilo musical aleatório usando IA (NVIDIA/DeepSeek) com fallback local.
+ * Retorna { style: string, engine: string }.
+ */
+export async function generateMusicStyle() {
+  // Tenta NVIDIA primeiro (se disponível)
+  if (nvidiaAvailable()) {
+    try {
+      const result = await callNvidiaForStyle();
+      return { style: result, engine: 'nvidia' };
+    } catch (err) {
+      log(`NVIDIA fora para gerar estilo (${primeiraLinha(err.message)}) -> tentando DeepSeek`);
+    }
+  }
+
+  // Fallback para DeepSeek (se disponível)
+  if (deepSeekAvailable()) {
+    try {
+      const result = await callDeepSeekForStyle();
+      return { style: result, engine: 'deepseek' };
+    } catch (err) {
+      log(`DeepSeek fora para gerar estilo (${primeiraLinha(err.message)}) -> usando lista local`);
+    }
+  }
+
+  // Fallback final: lista local
+  const randomStyle = LOCAL_STYLE_SUGGESTIONS[
+    Math.floor(Math.random() * LOCAL_STYLE_SUGGESTIONS.length)
+  ];
+  return { style: randomStyle, engine: 'local' };
+}
+
+/**
+ * Chama NVIDIA NIM para gerar um estilo musical.
+ */
+async function callNvidiaForStyle() {
+  log('pedindo estilo musical ao NVIDIA NIM');
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 15000); // 15s timeout
+  let res;
+  try {
+    res = await fetch(`${NVIDIA.baseURL}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${NVIDIA.apiKey}`,
+      },
+      body: JSON.stringify({
+        model: NVIDIA.model,
+        messages: [
+          { role: 'system', content: STYLE_SYSTEM_PROMPT },
+          { role: 'user', content: STYLE_USER_PROMPT },
+        ],
+        temperature: 1.1, // alta criatividade
+        max_tokens: 100,
+      }),
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timer);
+  }
+
+  const raw = await res.text();
+  let payload = null;
+  try { payload = JSON.parse(raw); } catch { /* tratado abaixo */ }
+  if (!res.ok) {
+    const motivo = payload?.error?.message || payload?.message || raw.slice(0, 200);
+    throw new Error(`NVIDIA respondeu ${res.status}: ${motivo}`);
+  }
+
+  const content = String(payload?.choices?.[0]?.message?.content || '').trim();
+  if (!content) throw new Error('NVIDIA não retornou conteúdo');
+
+  // Limpa a resposta (remove aspas, pontos finais desnecessários)
+  const clean = content.replace(/^["'`]+|["'`]+$/g, '').replace(/\.+$/, '').trim();
+  log(`NVIDIA devolveu estilo: "${clean.slice(0, 60)}"`);
+  return clean;
+}
+
+/**
+ * Chama DeepSeek para gerar um estilo musical.
+ */
+async function callDeepSeekForStyle() {
+  log('pedindo estilo musical ao DeepSeek');
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 15000); // 15s timeout
+  let res;
+  try {
+    res = await fetch(`${DEEPSEEK.baseURL}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${DEEPSEEK.apiKey}`,
+      },
+      body: JSON.stringify({
+        model: DEEPSEEK.model,
+        messages: [
+          { role: 'system', content: STYLE_SYSTEM_PROMPT },
+          { role: 'user', content: STYLE_USER_PROMPT },
+        ],
+        temperature: 1.1, // alta criatividade
+        max_tokens: 100,
+      }),
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timer);
+  }
+
+  const raw = await res.text();
+  let payload = null;
+  try { payload = JSON.parse(raw); } catch { /* tratado abaixo */ }
+  if (!res.ok) {
+    const motivo = payload?.error?.message || payload?.message || raw.slice(0, 200);
+    throw new Error(`DeepSeek respondeu ${res.status}: ${motivo}`);
+  }
+
+  const content = String(payload?.choices?.[0]?.message?.content || '').trim();
+  if (!content) throw new Error('DeepSeek não retornou conteúdo');
+
+  // Limpa a resposta
+  const clean = content.replace(/^["'`]+|["'`]+$/g, '').replace(/\.+$/, '').trim();
+  log(`DeepSeek devolveu estilo: "${clean.slice(0, 60)}"`);
+  return clean;
+}

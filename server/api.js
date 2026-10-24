@@ -15,7 +15,7 @@ import {
   mainLyricsProvider,
   PROVIDERS,
 } from './config.js';
-import { generateLyricsWithProvider } from './providers/lyrics.js';
+import { generateLyricsWithProvider, generateMusicStyle } from './providers/lyrics.js';
 import { generateMusic } from './providers/music.js';
 import { aceStepStatus, normalizeAudioMode } from './providers/acestep.js';
 import { generateLyrics as generateLocalLyrics, lyricTheme } from './lyrics.js';
@@ -696,6 +696,30 @@ export const handlers = {
       } catch (localError) {
         return json(res, 502, { error: `Falha ao gerar letra: ${localError.message}` });
       }
+    }
+  },
+
+  /**
+   * GET /api/generate-style
+   *
+   * Gera uma descrição criativa de estilo musical usando IA (NVIDIA/DeepSeek)
+   * com fallback na lista local. Usado pela varinha mágica do campo "Estilos".
+   */
+  async generateStyle(_req, res) {
+    try {
+      const result = await generateMusicStyle();
+      return json(res, 200, { style: result.style, engine: result.engine });
+    } catch (error) {
+      // fallback absoluto: nunca quebra
+      const LOCAL_STYLES = [
+        'Rock alternativo dos anos 90 com guitarra distorcida e bateria seca',
+        'Lo-fi chill com piano suave, chuva de fundo e textura de vinil',
+        'Trap pesado com 808 grave, hi-hats rápidos e sintetizadores escuros',
+        'MPB melancólica com violão, pandeiro e saxofone ao fundo',
+        'Synthwave dos anos 80 com sintetizadores neon e bateria eletrônica',
+      ];
+      const style = LOCAL_STYLES[Math.floor(Math.random() * LOCAL_STYLES.length)];
+      return json(res, 200, { style, engine: 'local', fallback: error.message });
     }
   },
 
