@@ -22,12 +22,14 @@ import { generateLyrics } from '../lyrics.js';
 import {
   DEEPSEEK,
   NVIDIA,
+  GROQ,
   OPENROUTER,
   PROVIDERS,
   RATE_LIMIT,
   activeLyricsProvider,
   deepSeekAvailable,
   nvidiaAvailable,
+  groqAvailable,
   openRouterAvailable,
 } from '../config.js';
 
@@ -242,10 +244,23 @@ export async function generateLyricsDeepSeek(temaOuOpts = {}, extra = {}) {
       return await retryWithBackoff(() => callNvidia(opts, tema), 'nvidia');
     } catch (err) {
       motivos.push(`NVIDIA: ${primeiraLinha(err.message)}`);
-      log(`NVIDIA fora (${motivos[motivos.length - 1]}) -> gerador local de templates`);
+      log(`NVIDIA fora (${motivos[motivos.length - 1]}) -> tentando o Groq`);
     }
   } else {
     motivos.push('NVIDIA: NVIDIA_API_KEY ausente');
+  }
+
+  // fallback tercario: Groq
+  if (groqAvailable()) {
+    try {
+      await throttle('groq');
+      return await retryWithBackoff(() => callGroq(opts, tema), 'groq');
+    } catch (err) {
+      motivos.push(`Groq: ${primeiraLinha(err.message)}`);
+      log(`Groq fora (${motivos[motivos.length - 1]}) -> gerador local de templates`);
+    }
+  } else {
+    motivos.push('Groq: GROQ_API_KEY ausente');
   }
 
   return localFallback(opts, motivos.join(' | '));
@@ -367,6 +382,92 @@ export async function generateLyricsNvidia(temaOuOpts = {}, extra = {}) {
     return await retryWithBackoff(() => callNvidia(opts, tema), 'nvidia');
   } catch (err) {
     return localFallback(opts, `NVIDIA: ${primeiraLinha(err.message)}`);
+  }
+}
+
+/* ---------------- Groq (fallback tercario) ---------------- */
+
+ /**
+  * Chamada crua ao Groq (`POST /chat/completions` da API do Groq, modelo
+  * llama3-groq-70b-8192-text-spec ou o definido em GROQ_MODEL). A API do Groq
+  * e compativel com OpenAI: usa Authorization: Bearer e o mesmo payload de
+  * mensagens. O system prompt e o MESMO do DeepSeek e NVIDIA (ver 4.1.1 e
+  * 4.2.0).
+  */
+async function callGroq(opts, tema) {
+  log(`pedindo letra ao Groq (${GROQ.model}): "${tema.slice(0, 60)}"`);
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), GROQ.timeoutMs);
+  let res;
+  try {
+    res = await fetch(`${GROQ.baseURL}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${GROQ.apiKey}`,
+      },
+      body: JSON.stringify({
+        model: GROQ.model,
+        messages: [
+          { role: 'system', content: SYSTEM_PROMPT_DEEPSEEK },
+          { role: 'user', content: buildDeepSeekUserPrompt(opts) },
+        ],
+        temperature: 0.9,
+        max_tokens: 900,
+      }),
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timer);
+  }
+
+  const raw = await res.text();
+  let payload = null;
+  try { payload = JSON.parse(raw); } catch { /* resposta nao-JSON tratada como erro abaixo */ }
+  if (!res.ok) {
+    const motivo = payload?.error?.message || payload?.message || raw.slice(0, 200);
+    throw new Error(`Groq respondeu ${res.status}: ${motivo}`);
+  }
+
+  const content = String(payload?.choices?.[0]?.message?.content || '').trim();
+  if (!content) throw new Error('Groq nao retornou conteudo');
+
+  if (opts.mode === 'next') {
+    const { linha } = parseLyricPayload(content, 'next');
+    if (!linha) throw new Error('Groq nao retornou a proxima linha');
+    log(`Groq devolveu a proxima linha ("${linha.slice(0, 40)}")`);
+    return { line: linha, engine: 'groq', model: GROQ.model };
+  }
+
+  const { letra } = parseLyricPayload(content, 'full');
+  if (!letra) throw new Error('Groq nao retornou a letra no JSON');
+  log(`Groq devolveu a letra (${letra.length} chars)`);
+  return { text: cleanLyric(letra), engine: 'groq', model: GROQ.model };
+}
+
+/**
+ * Gera letra com o Groq, com fallback para o gerador local.
+ * Aceita string (tema) ou opts.
+ * Esta funcao e chamada pela cadeia do generateLyricsDeepSeek
+ * (DeepSeek -> NVIDIA -> Groq -> Local).
+ */
+export async function generateLyricsGroq(temaOuOpts = {}, extra = {}) {
+  const opts = typeof temaOuOpts === 'string'
+    ? { ...extra, prompt: temaOuOpts }
+    : { ...temaOuOpts };
+  const tema = String(opts.prompt || '').trim();
+
+  if (!groqAvailable()) {
+    return localFallback(opts, 'Groq: GROQ_API_KEY ausente');
+  }
+  if (!tema) {
+    return localFallback(opts, 'tema vazio');
+  }
+  try {
+    await throttle('groq');
+    return await retryWithBackoff(() => callGroq(opts, tema), 'groq');
+  } catch (err) {
+    return localFallback(opts, `Groq: ${primeiraLinha(err.message)}`);
   }
 }
 

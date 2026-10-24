@@ -252,6 +252,25 @@ export function nvidiaAvailable() {
   return key.length >= 12;
 }
 
+/** O Groq esta pronto para uso? */
+export function groqAvailable() {
+  const key = GROQ.apiKey.toLowerCase();
+  if (PLACEHOLDER_VALUES.has(key)) return false;
+  return key.length >= 12;
+}
+
+/**
+ * Groq - provedor de letras TERCIARIO (fallback do NVIDIA).
+ * Quando DeepSeek e NVIDIA falharem, a cadeia tenta o Groq antes de cair
+ * no gerador local de templates. Chave: https://groq.com/groq-cloud
+ */
+export const GROQ = {
+  apiKey: (process.env.GROQ_API_KEY || '').trim(),
+  baseURL: (process.env.GROQ_BASE_URL || 'https://api.groq.com/openai/v1').replace(/\/+$/, ''),
+  model: (process.env.GROQ_MODEL || 'llama3-groq-70b-8192-text-spec').trim(),
+  timeoutMs: Number(process.env.GROQ_TIMEOUT_MS || 30000),
+};
+
 export function activeMusicProvider() {
   const { mode, replicate, fal } = PROVIDERS.music;
   if (mode === 'local') return 'local';
