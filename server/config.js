@@ -229,13 +229,13 @@ export const NVIDIA = {
   apiKey: (process.env.NVIDIA_API_KEY || '').trim(),
   baseURL: (process.env.NVIDIA_BASE_URL || 'https://integrate.api.nvidia.com/v1').replace(/\/+$/, ''),
   /**
-   * Modelo padrao: `openai/gpt-oss-20b` foi o mais rapido da sonda com a
-   * task de letra (14,8s vs 41s do MiniMax e 93s do Step-5) e o unico que
-   * devolveu JSON valido rapido. Os modelos `meta/llama-3.x-instruct`
-   * sairam de circulacao (end of life em 2026-08-26) e os `mistral-large`
-   * nao estao habilitados nesta conta (404).
+   * Modelo padrao: `deepseek-v4.1-flash` substitui o `openai/gpt-oss-20b` que
+   * estava retornando 429 (rate limit). O DeepSeek v4.1 Flash e rapido,
+   * gratuito no NVIDIA NIM e tem melhor disponibilidade. Os modelos
+   * `meta/llama-3.x-instruct` sairam de circulacao (end of life em 2026-08-26)
+   * e os `mistral-large` nao estao habilitados nesta conta (404).
    */
-  model: (process.env.NVIDIA_MODEL || 'openai/gpt-oss-20b').trim(),
+  model: (process.env.NVIDIA_MODEL || 'deepseek-ai/deepseek-v4.1-flash').trim(),
   /**
    * Timeout generoso: os modelos atuais do NIM sao de raciocinio e levam
    * 20-60s por resposta (medido: 42s com GLM-5.3, 20s com MiniMax). O NIM
