@@ -15,7 +15,7 @@ import {
   mainLyricsProvider,
   PROVIDERS,
 } from './config.js';
-import { generateLyricsWithProvider, generateMusicStyle } from './providers/lyrics.js';
+import { generateLyricsWithProvider, generateMusicStyle, expandStyleWithAI, activeMusicProvider } from './providers/lyrics.js';
 import { generateMusic } from './providers/music.js';
 import { aceStepStatus, normalizeAudioMode } from './providers/acestep.js';
 import { generateLyrics as generateLocalLyrics, lyricTheme } from './lyrics.js';
@@ -63,6 +63,29 @@ function slugify(text) {
 const STOPWORDS = new Set(['de', 'do', 'da', 'das', 'dos', 'com', 'sobre', 'no', 'na', 'nos', 'nas', 'em', 'e', 'a', 'o', 'um', 'uma', 'para', 'pra', 'que', 'e']);
 const GENRE_WORDS = new Set(['mpb', 'trap', 'pop', 'rock', 'funk', 'samba', 'sertanejo', 'forro', 'forró', 'pagode', 'lofi', 'lo-fi', 'house', 'gospel', 'jazz', 'ambient', 'reaggaeton', 'baile', 'disco', 'soul']);
 
+/**
+ * Dicionário local de descrições de estilo para fallback quando a IA indisponível.
+ * Mapeia a chave do gênero (minúsculo) para uma descrição detalhada no formato Suno AI.
+ */
+const STYLE_EXPANSION_DICT = new Map([
+  ['mpb', 'MPB melancólica com violão, pandeiro e saxofone ao fundo, ritmo moderado, voz sentimental'],
+  ['trap', 'Trap pesado com 808 grave, hi-hats rápidos e sintetizadores escuros, BPM 140, voz arrastada'],
+  ['pop', 'Pop dançante com sintetizadores brilhantes e refrão chiclete, BPM 128, voz clara e dominante'],
+  ['rock', 'Rock energético com guitarra distorcida e bateria pesada, BPM 130, voz potente e distorcida'],
+  ['sertanejo', 'Sertanejo universitário com viola, sanfona e batida em dois, BPM 90, vocal emocional'],
+  ['forro', 'Forró animado com sanfona, zabumba e triângulo, BPM 110, vocal animado e danceable'],
+  ['samba', 'Samba de roda animado com pandeiro, cavaquinho e surdo no refrão, BPM 100, voz clássica'],
+  ['lofi', 'Lo-fi chill com piano suave, chuva de fundo e textura de vinil, BPM 70, instrumental relax'],
+  ['house', 'House club com kick de quatro tempos, hi-hat e sintetizador pulsante, BPM 125, vocal elegante'],
+  ['gospel', 'Gospel soul com coro, piano e dinâmica crescente no refrão, BPM 80, voz poderosa'],
+  ['jazz', 'Jazz de madrugada com piano, contrabaixo e saxofone quente, BPM 60, vocal suave'],
+  ['ambient', 'Ambient etéreo com pads atmosféricos e texturas flutuantes, BPM 60, instrumental imersivo'],
+  ['reaggaeton', 'Reaggaeton com dembow suave, sintetizadores escuros e reggae influence, BPM 108, voz sedutora'],
+  ['baile', 'Funk de baile com tamborzão, grave 808 e MC fazendo bordão, BPM 135, vocal gritado'],
+  ['disco', 'Disco music com guitarra funky, seção de metais brilhante e ritmo disco, BPM 120, vocal suave'],
+  ['soul', 'Soul groovy com baixo encorpado, Rhodes e grooves relaxados, BPM 95, vocal emotivo'],
+]);
+
 function titleFromPrompt(prompt, genre) {
   const clean = String(prompt || '').trim();
   if (!clean) return `Faixa ${genre || 'nova'}`;
@@ -80,6 +103,19 @@ function titleFromPrompt(prompt, genre) {
   }
   const title = words.join(' ');
   return title.charAt(0).toUpperCase() + title.slice(1);
+}
+
+/**
+ * Verifica se o estilo é uma palavra curta (gênero único, sem descrição).
+ * Returns true se o style for uma palavra única que está no conjunto GENRE_WORDS.
+ */
+function isShortStyle(style) {
+  if (!style || typeof style !== 'string') return false;
+  const trimmed = style.trim();
+  // Must be a single word (no spaces)
+  if (trimmed.includes(' ')) return false;
+  // Must be in the known genre words set
+  return GENRE_WORDS.has(trimmed.toLowerCase());
 }
 
 function trackById(id) {
@@ -603,6 +639,31 @@ export const handlers = {
       createdAt: Date.now(),
       clients: new Set(),
     };
+
+    // --- Expansão automática de estilo ---
+    // Só expande se o provider de música não for 'local' (ou seja, vai usar ACE-Step ou provedor remoto)
+    const musicProvider = activeMusicProvider();
+    if (options.style && isShortStyle(options.style) && musicProvider !== 'local') {
+      // Tenta expandir com IA primeiro
+      const expanded = await expandStyleWithAI(options.style);
+      if (expanded) {
+        // Salva o estilo original para exibição no frontend
+        const originalStyle = options.style;
+        options.style = expanded;
+        // Atualiza o rótulo para mostrar: original → expandido
+        options.styleLabel = `${originalStyle} → ${expanded}`;
+        options.styleSource = 'ai-expanded';
+      } else {
+        // Fallback: dicionário local
+        const local = STYLE_EXPANSION_DICT.get(options.style.toLowerCase().trim());
+        if (local) {
+          const originalStyle = options.style;
+          options.style = local;
+          options.styleLabel = `${originalStyle} → ${local}`;
+          options.styleSource = 'local-fallback';
+        }
+      }
+    }
     jobs.set(job.id, job);
     setTimeout(() => executeJob(job, options, referenceAudio), 10);
     return json(res, 202, { jobId: job.id, status: job.status });

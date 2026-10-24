@@ -710,6 +710,162 @@ async function callDeepSeekForStyle() {
   return clean;
 }
 
+/* ---------------- Expansão de Estilo com IA ---------------- */
+
+/**
+ * Prompt para expansão de estilo musical via IA (NVIDIA/Groq).
+ * Formato Suno AI: instrumentos, BPM, tipo de vocal e clima.
+ */
+const STYLE_EXPANSION_SYSTEM_PROMPT = 'Você é um especialista em estilos musicais Suno AI. '
+  + 'Gere uma descrição detalhada e estruturada de um estilo musical, '
+  + 'incluindo: instrumentos característicos, BPM aproximado, tipo de voz/vocal '
+  + 'e o clima/mood da produção. '
+  + 'Responda APENAS com a descrição, sem aspas, sem introdução, sem explicações.';
+
+const STYLE_EXPANSION_USER_PROMPT = 'Gere uma descrição detalhada de estilo musical no formato Suno AI para o gênero: {gênero}. '
+  + 'Inclua instrumentos, BPM, tipo de vocal e clima. '
+  + 'Responda apenas com a descrição.';
+
+/**
+ * Expande um gênero musical curto usando IA (NVIDIA NIM ou Groq).
+ * Retorna a descrição expandida ou null em caso de erro.
+ */
+export async function expandStyleWithAI(genre) {
+  const genreLower = String(genre || '').trim().toLowerCase();
+  if (!genreLower) return null;
+
+  // Tenta NVIDIA primeiro
+  if (nvidiaAvailable()) {
+    try {
+      log('[estilo-ia] tentando gerar expansão com NVIDIA NIM');
+      const prompt = STYLE_EXPANSION_USER_PROMPT.replace('{gênero}', genreLower);
+      const result = await callNvidiaForStyleExpansion(prompt);
+      log(`[estilo-ia] NVIDIA expandiu: "${result.slice(0, 80)}"`);
+      return result;
+    } catch (err) {
+      log(`[estilo-ia] NVIDIA fora: ${primeiraLinha(err.message)} -> tentando Groq`);
+    }
+  } else {
+    log('[estilo-ia] NVIDIA_API_KEY ausente, pulando para Groq');
+  }
+
+  // Fallback para Groq
+  if (groqAvailable()) {
+    try {
+      log('[estilo-ia] tentando gerar expansão com Groq');
+      const prompt = STYLE_EXPANSION_USER_PROMPT.replace('{gênero}', genreLower);
+      const result = await callGroqForStyleExpansion(prompt);
+      log(`[estilo-ia] Groq expandiu: "${result.slice(0, 80)}"`);
+      return result;
+    } catch (err) {
+      log(`[estilo-ia] Groq fora: ${primeiraLinha(err.message)} -> usando local`);
+    }
+  } else {
+    log('[estilo-ia] GROQ_API_KEY ausente, usando lista local');
+  }
+
+  return null;
+}
+
+/**
+ * Chama NVIDIA NIM para expansão de estilo.
+ */
+async function callNvidiaForStyleExpansion(prompt) {
+  log('pedindo expansão de estilo ao NVIDIA NIM');
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 8000);
+  let res;
+  try {
+    res = await fetch(`${NVIDIA.baseURL}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${NVIDIA.apiKey}`,
+      },
+      body: JSON.stringify({
+        model: NVIDIA.model,
+        messages: [
+          { role: 'system', content: STYLE_EXPANSION_SYSTEM_PROMPT },
+          { role: 'user', content: prompt },
+        ],
+        temperature: 1.1,
+        max_tokens: 150,
+      }),
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timer);
+  }
+
+  const raw = await res.text();
+  let payload = null;
+  try { payload = JSON.parse(raw); } catch { /* tratado abaixo */ }
+  if (!res.ok) {
+    const motivo = payload?.error?.message || payload?.message || raw.slice(0, 200);
+    throw new Error(`NVIDIA respondeu ${res.status}: ${motivo}`);
+  }
+
+  const msg = payload?.choices?.[0]?.message || {};
+  const content = String(msg.content || '').trim();
+  if (!content) {
+    const raciocinio = String(msg.reasoning_content || '').trim();
+    if (raciocinio) {
+      throw new Error('NVIDIA só devolveu raciocínio, sem conteúdo');
+    }
+    throw new Error('NVIDIA não retornou conteúdo');
+  }
+
+  const clean = content.replace(/^["'`]+|["'`]+$/g, '').replace(/\.+$/, '').trim();
+  log(`NVIDIA devolveu estilo expandido: "${clean.slice(0, 80)}"`);
+  return clean;
+}
+
+/**
+ * Chama Groq para expansão de estilo.
+ */
+async function callGroqForStyleExpansion(prompt) {
+  log('pedindo expansão de estilo ao Groq');
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 30000);
+  let res;
+  try {
+    res = await fetch(`${GROQ.baseURL}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${GROQ.apiKey}`,
+      },
+      body: JSON.stringify({
+        model: GROQ.model,
+        messages: [
+          { role: 'system', content: STYLE_EXPANSION_SYSTEM_PROMPT },
+          { role: 'user', content: prompt },
+        ],
+        temperature: 1.1,
+        max_tokens: 150,
+      }),
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timer);
+  }
+
+  const raw = await res.text();
+  let payload = null;
+  try { payload = JSON.parse(raw); } catch { /* tratado abaixo */ }
+  if (!res.ok) {
+    const motivo = payload?.error?.message || payload?.message || raw.slice(0, 200);
+    throw new Error(`Groq respondeu ${res.status}: ${motivo}`);
+  }
+
+  const content = String(payload?.choices?.[0]?.message?.content || '').trim();
+  if (!content) throw new Error('Groq não retornou conteúdo');
+
+  const clean = content.replace(/^["'`]+|["'`]+$/g, '').replace(/\.+$/, '').trim();
+  log(`Groq devolveu estilo expandido: "${clean.slice(0, 80)}"`);
+  return clean;
+}
+
 /* ---------------- Controle de Rate Limit e Retry ---------------- */
 
 /**
