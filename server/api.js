@@ -677,19 +677,22 @@ export const handlers = {
 
     try {
       const result = await generateLyricsWithProvider(opts);
+      // provider = rotulo amigavel para o front (o engine local e 'local-templates')
+      const provider = result.engine === 'local-templates' ? 'local' : result.engine;
       if (opts.mode === 'next') {
         const line = result.line || result.text || '';
-        return json(res, 200, { line, theme: result.theme, engine: result.engine });
+        return json(res, 200, { line, theme: result.theme, engine: result.engine, provider });
       }
-      return json(res, 200, result);
+      return json(res, 200, { ...result, provider });
     } catch (error) {
       // fallback offline: o app nunca quebra por falta de chave/rede
       try {
         const local = generateLocalLyrics(opts);
+        const motivo = `${error.message}`.split('\n')[0].slice(0, 120);
         if (opts.mode === 'next') {
-          return json(res, 200, { line: local.line, theme: local.theme, engine: 'local-templates' });
+          return json(res, 200, { line: local.line, theme: local.theme, engine: 'local-templates', provider: 'local', fallback: motivo });
         }
-        return json(res, 200, { ...local, engine: 'local-templates' });
+        return json(res, 200, { ...local, engine: 'local-templates', provider: 'local', fallback: motivo });
       } catch (localError) {
         return json(res, 502, { error: `Falha ao gerar letra: ${localError.message}` });
       }

@@ -49,7 +49,7 @@ O player tem uma **faixa de barras** no topo que reage à frequência da música
 - **Responsivo**: o buffer do canvas é recalculado no `resize`/`orientationchange` e por `ResizeObserver`, respeitando o `devicePixelRatio` (limitado a 2× para não pesar no celular). A faixa encolhe no mobile (`--spectrum-h`) e o player ganha altura (`--player-h`) para acomodá-la sem empurrar o conteúdo.
 - **Fallback**: sem Web Audio API (ou se o navegador bloquear o `AudioContext`), o app continua tocando normalmente — só não há visualização.
 
-Teste automatizado (Chromium headless via CDP; a suíte completa soma **236 verificações**):
+Teste automatizado (Chromium headless via CDP; a suíte completa soma **237 verificações**):
 
 ```bash
 npm test              # precisa do servidor no ar (npm start)
@@ -477,7 +477,7 @@ Regras da geração de letra (da lâmpada 💡, em `gerarLetra()`):
 **Teste**
 
 ```bash
-npm run test:varinha                # navegador headless (Chromium), motor local, 35 verificações
+npm run test:varinha                # navegador headless (Chromium), motor local, 36 verificações
 ```
 
 O teste confere as duas listas (≥ 15 itens cada) e que **todos os temas da lista da ✨ são frases de 1 linha, sem `[tags]`**; que a varinha de **Estilos** preenche o campo com um item **da lista** sem repetir, que a animação `is-magic` dispara no campo e nos dois botões do bloco, que os chips de gênero ficam desativados (prioridade do texto), que a **💡 lâmpada gera** letra completa (com tags de seção) a partir do tema digitado — e que dois cliques com o mesmo tema dão letras diferentes —, que a **✨ estrela só sorteia um tema** de 1 linha (item da lista, sem tags de seção, **sem chamar `/api/lyrics`**), que **dois cliques seguidos dela não repetem o tema**, que depois a 💡 **transforma aquele tema em letra completa e é ela quem faz a chamada à API** (contagem de requests), que **um item corrompido na lista não vaza estrutura de música para o campo** (blindagem `temaCurto()`), que o bloco "Letra" é reaberto e que o layout **mobile** (390 px) segue sem overflow.
@@ -558,6 +558,8 @@ A chamada aparece no log do servidor (`server.log`):
 | Tema vazio (o usuário digitou a letra) | a letra escrita pelo usuário **não passa pelo DeepSeek** |
 
 Em todos os casos o resultado vem com `engine: 'local-templates'` (e o card de resultado avisa), então dá para saber de onde veio a letra.
+
+**Rotulo no frontend.** A rota `POST /api/lyrics` devolve, junto da letra, o campo **`provider`** (`deepseek` | `openrouter` | `openai` | `local` — o `engine` cru também vai junto, mais `fallback` com o motivo quando houve queda). O toast da 💡 usa ele para dizer **"Letra gerada via DeepSeek"** ou **"Letra gerada localmente"** — e, no fallback, mostra o motivo na hora (ex.: "Letra gerada localmente (DeepSeek respondeu 402: Insufficient Balance)"), sem precisar abrir o log.
 
 **Provedores de letra: a cadeia**
 

@@ -196,8 +196,9 @@ try {
   const letra = await pedirLetra(server.url, { prompt: TEMA, lang: 'pt' });
   const pedido = stub.last();
   check('http: /api/lyrics devolve a letra extraida do JSON do DeepSeek',
-    letra.text === LETRA_DEEPSEEK && letra.engine === 'deepseek',
-    JSON.stringify({ engine: letra.engine, texto: String(letra.text).slice(0, 40) }));
+    letra.text === LETRA_DEEPSEEK && letra.engine === 'deepseek'
+    && letra.provider === 'deepseek',
+    JSON.stringify({ engine: letra.engine, provider: letra.provider, texto: String(letra.text).slice(0, 40) }));
   check('http: o pedido usa o modelo deepseek-chat',
     pedido.model === 'deepseek-chat', String(pedido.model));
   check('http: o pedido liga o JSON mode (response_format json_object)',
@@ -225,9 +226,10 @@ try {
 
   // 1c. falha na API (stub 500) -> GERADOR LOCAL assume, sem quebrar
   const letraFalha = await pedirLetra(server.url, { prompt: `FALHAR ${TEMA}`, lang: 'pt' });
-  check('http: DeepSeek 500 -> /api/lyrics cai no gerador local (200, local-templates)',
-    letraFalha.engine === 'local-templates' && /\[[A-Za-z]/.test(letraFalha.text || ''),
-    JSON.stringify({ engine: letraFalha.engine, texto: String(letraFalha.text).slice(0, 40) }));
+  check('http: DeepSeek 500 -> /api/lyrics cai no gerador local (200, provider local + motivo)',
+    letraFalha.engine === 'local-templates' && letraFalha.provider === 'local'
+    && /500/.test(letraFalha.fallback || '') && /\[[A-Za-z]/.test(letraFalha.text || ''),
+    JSON.stringify({ engine: letraFalha.engine, provider: letraFalha.provider, fallback: letraFalha.fallback }));
   const faixaFalha = await gerar(server.url, { prompt: 'MPB melancólica com violão', lyrics: `FALHAR ${TEMA}` });
   check('http: DeepSeek 500 na geracao -> faixa sai com a letra local (nao quebra)',
     faixaFalha.lyricsEngine === 'local-templates' && faixaFalha.lyrics !== LETRA_DEEPSEEK,
@@ -253,8 +255,9 @@ try {
   try {
     const letraLocal = await pedirLetra(semChave.url, { prompt: TEMA, lang: 'pt' });
     check('http: sem DEEPSEEK_API_KEY -> gerador local de templates (nem chama a API)',
-      letraLocal.engine === 'local-templates' && stub.pedidos.length === antes,
-      JSON.stringify({ engine: letraLocal.engine, chamadas_ao_stub: stub.pedidos.length - antes }));
+      letraLocal.engine === 'local-templates' && letraLocal.provider === 'local'
+      && stub.pedidos.length === antes,
+      JSON.stringify({ engine: letraLocal.engine, provider: letraLocal.provider, chamadas_ao_stub: stub.pedidos.length - antes }));
   } finally {
     semChave.child.kill('SIGKILL');
     fs.rmSync(semChave.dataDir, { recursive: true, force: true, maxAttempts: 3 });

@@ -201,6 +201,11 @@ try {
     (await browser.cdp.eval(`(() => window.__magic.letra)`)));
   check('o botao da lampada 💡 ganha a animacao (is-magic)',
     (await browser.cdp.eval(`(() => window.__magic.letraBotao)`)));
+  const toastLetra = await browser.cdp.eval(`(() => Array.from(document.querySelectorAll('#toasts .toast'))
+    .map((t) => t.textContent).join(' | '))`);
+  check('o toast da lampada informa QUEM gerou a letra ("Letra gerada localmente" aqui, com MUSICGPT_LYRICS_PROVIDER=local)',
+    /Letra gerada localmente/.test(toastLetra) && !/local-templates/.test(toastLetra),
+    JSON.stringify(toastLetra));
 
   // com um tema escrito no campo, a lampada usa ELE como semente
   const TEMA_DIGITADO = 'Uma música sobre aceitar que o fim já chegou';

@@ -54,6 +54,26 @@ function toast(message, type = 'info') {
   }, 3600);
 }
 
+/**
+ * Rotulo amigavel de QUEM escreveu a letra, lido da resposta do backend
+ * (`provider`, com `engine` como plano B). Se a IA falhou e o gerador
+ * local assumiu, o backend manda o motivo em `fallback` - mostramos ele
+ * junto, para o usuario saber por que a letra nao veio da IA.
+ */
+function labelLetra(res) {
+  const provedor = res?.provider || res?.engine || '';
+  const base = provedor === 'deepseek' ? 'Letra gerada via DeepSeek'
+    : provedor === 'openrouter' ? 'Letra gerada via OpenRouter'
+    : provedor === 'openai' ? 'Letra gerada via OpenAI'
+      : provedor === 'acestep-lm' ? 'Letra escrita pelo ACE-Step'
+        : (provedor === 'local' || provedor === 'local-templates') ? 'Letra gerada localmente'
+          : 'Letra criada';
+  const motivo = res?.fallback
+    ? ` (${String(res.fallback).replace(/\s*\(request_id:[^)]*\)/, '')})`
+    : '';
+  return `${base}${motivo}`;
+}
+
 async function api(path, options = {}) {
   const res = await fetch(path, {
     headers: { 'Content-Type': 'application/json' },
@@ -712,7 +732,7 @@ async function generateLyrics(mode) {
       $('#lyricsEditor').value = res.text;
       state.collab = res.text.split('\n').filter((l) => l.trim() && !/^\[.*\]$/.test(l.trim()));
       renderCollab();
-      toast('Letra criada. Edite à vontade.', 'ok');
+      toast(`${labelLetra(res)}. Edite à vontade.`, 'ok');
     } else {
       $('#lyricsEditor').value = `${$('#lyricsEditor').value.replace(/\s*$/, '')}\n${res.line}`.trim();
       state.collab.push(res.line);
@@ -1580,7 +1600,7 @@ function bind() {
       $('#customLyrics').value = texto;
       expandBlock('lyrics');
       magicEffect($('#customLyrics'), btn);
-      toast(`Letra criada a partir do tema (${res.engine || 'IA'}).`, 'ok');
+      toast(`${labelLetra(res)}.`, 'ok');
       return texto;
     } finally {
       btn.classList.remove('is-busy');
