@@ -246,10 +246,11 @@ async function callDeepSeek(opts, tema) {
  * gerador local (`{ prompt, lang, style, seed, mode, context }`).
  *
  * Se o DeepSeek falhar (sem chave, rede, saldo, 4xx/5xx, JSON invalido), o
- * NVIDIA NIM assume quando ha NVIDIA_API_KEY; se tambem faltar ou falhar,
- * cai NO GERADOR LOCAL de templates - o app nunca quebra. O resultado vem
- * com `engine` indicando quem escreveu ('deepseek' | 'nvidia' |
- * 'local-templates') e, no fallback, `fallback` com o(s) motivo(s).
+ * Groq assume; se tambem falhar, a NVIDIA NIM entra por ultimo (mais lenta,
+ * modelos de raciocínio). Se todos falharem, cai NO GERADOR LOCAL de
+ * templates - o app nunca quebra. O resultado vem com `engine` indicando
+ * quem escreveu ('deepseek' | 'groq' | 'nvidia' | 'local-templates') e,
+ * no fallback, `fallback` com o(s) motivo(s).
  */
 export async function generateLyricsDeepSeek(temaOuOpts = {}, extra = {}) {
   const opts = typeof temaOuOpts === 'string'
@@ -269,36 +270,36 @@ export async function generateLyricsDeepSeek(temaOuOpts = {}, extra = {}) {
       return await retryWithBackoff(() => callDeepSeek(opts, tema), 'deepseek');
     } catch (err) {
       motivos.push(`DeepSeek: ${primeiraLinha(err.message)}`);
-      log(`DeepSeek fora (${motivos[motivos.length - 1]}) -> tentando o NVIDIA NIM`);
+      log(`DeepSeek fora (${motivos[motivos.length - 1]}) -> tentando o Groq`);
     }
   } else {
     motivos.push('DeepSeek: DEEPSEEK_API_KEY ausente');
   }
 
-  // fallback secundario: NVIDIA NIM (mesmo prompt, ver 4.1.1)
-  if (nvidiaAvailable()) {
-    try {
-      await throttle('nvidia');
-      return await retryWithBackoff(() => callNvidia(opts, tema), 'nvidia');
-    } catch (err) {
-      motivos.push(`NVIDIA: ${primeiraLinha(err.message)}`);
-      log(`NVIDIA fora (${motivos[motivos.length - 1]}) -> tentando o Groq`);
-    }
-  } else {
-    motivos.push('NVIDIA: NVIDIA_API_KEY ausente');
-  }
-
-  // fallback tercario: Groq
+  // fallback secundario: Groq (rapido)
   if (groqAvailable()) {
     try {
       await throttle('groq');
       return await retryWithBackoff(() => callGroq(opts, tema), 'groq');
     } catch (err) {
       motivos.push(`Groq: ${primeiraLinha(err.message)}`);
-      log(`Groq fora (${motivos[motivos.length - 1]}) -> gerador local de templates`);
+      log(`Groq fora (${motivos[motivos.length - 1]}) -> tentando o NVIDIA NIM`);
     }
   } else {
     motivos.push('Groq: GROQ_API_KEY ausente');
+  }
+
+  // fallback terciario: NVIDIA NIM (mais lento, modelos de raciocínio)
+  if (nvidiaAvailable()) {
+    try {
+      await throttle('nvidia');
+      return await retryWithBackoff(() => callNvidia(opts, tema), 'nvidia');
+    } catch (err) {
+      motivos.push(`NVIDIA: ${primeiraLinha(err.message)}`);
+      log(`NVIDIA fora (${motivos[motivos.length - 1]}) -> gerador local de templates`);
+    }
+  } else {
+    motivos.push('NVIDIA: NVIDIA_API_KEY ausente');
   }
 
   return localFallback(opts, motivos.join(' | '));

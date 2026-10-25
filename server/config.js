@@ -200,7 +200,7 @@ export const DEEPSEEK = {
   apiKey: (process.env.DEEPSEEK_API_KEY || '').trim(),
   baseURL: (process.env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com').replace(/\/+$/, ''),
   model: (process.env.DEEPSEEK_MODEL || 'deepseek-chat').trim(),
-  timeoutMs: Number(process.env.DEEPSEEK_TIMEOUT_MS || 60000),
+  timeoutMs: Number(process.env.DEEPSEEK_TIMEOUT_MS || 15000),
 };
 
 /** O DeepSeek esta pronto para uso? */
@@ -242,7 +242,7 @@ export const NVIDIA = {
    * e o fallback do DeepSeek, entao vale esperar mais um pouco antes de
    * desistir e cair no gerador local.
    */
-  timeoutMs: Number(process.env.NVIDIA_TIMEOUT_MS || 120000),
+  timeoutMs: Number(process.env.NVIDIA_TIMEOUT_MS || 20000),
 };
 
 /** O NVIDIA NIM esta pronto para uso? */
@@ -268,7 +268,7 @@ export const GROQ = {
   apiKey: (process.env.GROQ_API_KEY || '').trim(),
   baseURL: (process.env.GROQ_BASE_URL || 'https://api.groq.com/openai/v1').replace(/\/+$/, ''),
   model: (process.env.GROQ_MODEL || 'llama3-groq-70b-8192-text-spec').trim(),
-  timeoutMs: Number(process.env.GROQ_TIMEOUT_MS || 30000),
+  timeoutMs: Number(process.env.GROQ_TIMEOUT_MS || 15000),
 };
 
 export function activeMusicProvider() {
@@ -292,13 +292,14 @@ export function activeLyricsProvider() {
   if (mode === 'openrouter' && openRouterAvailable()) return 'openrouter';
   if (mode === 'openai' && openai.key) return 'openai';
   // auto: o DeepSeek e o gerador de letras padrao quando ha chave - ele
-  // substitui o gerador local de templates (que vira o fallback). O NVIDIA
-  // NIM e a segunda opcao da cadeia (e tambem o fallback do DeepSeek).
+  // substitui o gerador local de templates (que vira o fallback). O Groq
+  // vem em segundo (rapido), a NVIDIA NIM por ultimo (mais lenta,
+  // modelos de raciocínio).
   if (deepSeekAvailable()) return 'deepseek';
-  if (nvidiaAvailable()) return 'nvidia';
+  if (groqAvailable()) return 'groq';
   if (openRouterAvailable()) return 'openrouter';
   if (openai.key) return 'openai';
-  return 'local';
+  return nvidiaAvailable() ? 'nvidia' : 'local';
 }
 
 /**
@@ -318,10 +319,10 @@ export function mainLyricsProvider() {
   if (mode === 'nvidia' && nvidiaAvailable()) return 'nvidia';
   if (mode === 'local') return 'local';
   // auto (ou deepseek explicito): DeepSeek substitui o gerador local e, se
-  // ele cair, a cadeia do proprio DeepSeek tenta o NVIDIA NIM antes do
-  // local. Sem chave do DeepSeek mas com a do NVIDIA, ja entra no NVIDIA.
+  // ele cair, a cadeia do proprio DeepSeek tenta o Groq antes da NVIDIA
+  // (que e mais lenta, modelos de raciocínio).
   if (deepSeekAvailable()) return 'deepseek';
-  return nvidiaAvailable() ? 'nvidia' : 'local';
+  return groqAvailable() ? 'groq' : (nvidiaAvailable() ? 'nvidia' : 'local');
 }
 
 /**
