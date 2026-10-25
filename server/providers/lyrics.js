@@ -828,7 +828,8 @@ async function callNvidiaForStyleExpansionWithNemotron(prompt) {
           { role: 'user', content: prompt },
         ],
         temperature: 1.1,
-        max_tokens: 2500,
+        max_tokens: 4096,
+        chat_template_kwargs: { enable_thinking: false },
       }),
       signal: controller.signal,
     });
