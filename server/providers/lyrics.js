@@ -465,10 +465,17 @@ async function callGroq(opts, tema) {
   try { payload = JSON.parse(raw); } catch { /* resposta nao-JSON tratada como erro abaixo */ }
 
   // Tratamento de rate limit (429): aguarda o retry-after indicado pela API
-  // e tenta uma unica vez antes de desistir.
+  // e tenta uma unica vez, mas so se o tempo de espera nao estourar o limite
+  // seguro (20s) para nao comprometer o timeout total de 60s do frontend.
+  // Se o retry-after for maior que 20s, nao tenta: deixa o erro propagar
+  // para o provedor seguinte da cadeia (NVIDIA).
   if (res.status === 429) {
     const retryAfter = res.headers.get('retry-after');
     const delayMs = retryAfter ? Number(retryAfter) * 1000 : 5000;
+    if (delayMs > 20000) {
+      log(`Groq 429 rate limit: retry-after de ${delayMs}ms excede o limite seguro (20s), pulando para o proximo provedor`);
+      throw new Error(`Groq respondeu 429: rate limit (retry-after ${delayMs}ms, pulando para o proximo provedor)`);
+    }
     log(`Groq 429 rate limit: aguardando ${delayMs}ms antes de retry único`);
     await new Promise((resolve) => setTimeout(resolve, delayMs));
     try {

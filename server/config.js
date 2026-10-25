@@ -267,9 +267,9 @@ export function groqAvailable() {
 export const GROQ = {
   apiKey: (process.env.GROQ_API_KEY || '').trim(),
   baseURL: (process.env.GROQ_BASE_URL || 'https://api.groq.com/openai/v1').replace(/\/+$/, ''),
-  // llama-3.3-70b-versatile: 12.000 TPM (maior que o gpt-oss-120b que estourava 8.000 TPM).
-  // Alternativa mais leve: llama-3.1-8b-instant (6.000 TPM).
-  model: (process.env.GROQ_MODEL || 'llama-3.3-70b-versatile').trim(),
+  // llama-3.1-8b-instant: 6.000 TPM, mais leve e muito mais difícil de estourar
+  // o limite. Alternativa maior: llama-3.3-70b-versatile (12.000 TPM).
+  model: (process.env.GROQ_MODEL || 'llama-3.1-8b-instant').trim(),
   timeoutMs: Number(process.env.GROQ_TIMEOUT_MS || 15000),
 };
 
