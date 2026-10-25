@@ -1655,6 +1655,8 @@ function bind() {
    */
   async function gerarLetra({ tema, btn }) {
     const spinner = $('#btnLyricAISpinner');
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 60000); // 60s de timeout
     btn.disabled = true;
     btn.classList.add('is-loading');
     if (spinner) spinner.style.display = 'block';
@@ -1663,6 +1665,7 @@ function bind() {
       const res = await api('/api/lyrics', {
         method: 'POST',
         body: { prompt: tema, style: $('#prompt').value.trim(), mode: 'full', seed: novaSeed() },
+        signal: ctrl.signal,
       });
       const texto = String(res.text || '').trim();
       if (!texto) throw new Error('a IA não devolveu letra.');
@@ -1671,7 +1674,15 @@ function bind() {
       magicEffect($('#customLyrics'), btn);
       toast(`${labelLetra(res)}.`, 'ok');
       return texto;
+    } catch (err) {
+      if (err.name === 'AbortError' || /aborted/i.test(err.message)) {
+        toast('A geração de letra demorou muito, tente novamente.', 'error');
+      } else {
+        toast(err.message, 'error');
+      }
+      throw err;
     } finally {
+      clearTimeout(timer);
       btn.disabled = false;
       btn.classList.remove('is-loading');
       if (spinner) spinner.style.display = 'none';
