@@ -8,7 +8,7 @@ import https from 'node:https';
 import fs from 'node:fs';
 import path from 'node:path';
 import { HOST, PUBLIC_DIR, resolvePort } from './config.js';
-import { activeMusicProvider, aceStepAvailable, activeLyricsProvider, mainLyricsProvider, deepSeekAvailable, nvidiaAvailable } from './config.js';
+import { activeMusicProvider, aceStepAvailable, activeLyricsProvider, mainLyricsProvider, deepSeekAvailable, nvidiaAvailable, groqAvailable } from './config.js';
 import { handlers, json } from './api.js';
 
 /**
@@ -157,14 +157,18 @@ server.listen(PORT, HOST, () => {
   }
   const letras = activeLyricsProvider();
   const letrasPrincipal = mainLyricsProvider();
-  console.log(`  -> provedor de letras: ${letras}${letras === 'deepseek' ? ' (DeepSeek)' : letras === 'nvidia' ? ' (NVIDIA NIM)' : ''}`);
+  const provedorLabel = letras === 'deepseek' ? ' (DeepSeek)'
+    : letras === 'groq' ? ' (Groq)'
+    : letras === 'nvidia' ? ' (NVIDIA NIM)'
+    : '';
+  console.log(`  -> provedor de letras: ${letras}${provedorLabel}`);
   if (letrasPrincipal !== letras) console.log(`     letras na geracao principal: ${letrasPrincipal}`);
-  if (letras === 'deepseek' || letras === 'nvidia') {
-    console.log('     cadeia de fallback: DeepSeek -> NVIDIA NIM -> gerador local de templates');
+  if (letras === 'deepseek' || letras === 'groq' || letras === 'nvidia') {
+    console.log('     cadeia de fallback: DeepSeek -> Groq -> NVIDIA NIM -> gerador local de templates');
   }
-  if (letras === 'local' && !deepSeekAvailable() && !nvidiaAvailable()) {
-    console.log('  -> DEEPSEEK_API_KEY/NVIDIA_API_KEY ausentes: letras no gerador local de templates.');
-    console.log('     pegue a chave em https://platform.deepseek.com ou https://build.nvidia.com e coloque no .env');
+  if (letras === 'local' && !deepSeekAvailable() && !groqAvailable() && !nvidiaAvailable()) {
+    console.log('  -> DEEPSEEK_API_KEY/GROQ_API_KEY/NVIDIA_API_KEY ausentes: letras no gerador local de templates.');
+    console.log('     pegue as chaves em https://platform.deepseek.com, https://groq.com/groq-cloud ou https://build.nvidia.com e coloque no .env');
   }
   if (useHttps) {
     console.log('  -> PWA instalável (origem segura). Para o celular, use o IP da rede local ou um túnel HTTPS.');
