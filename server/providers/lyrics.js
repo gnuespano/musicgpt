@@ -463,6 +463,48 @@ async function callGroq(opts, tema) {
   const raw = await res.text();
   let payload = null;
   try { payload = JSON.parse(raw); } catch { /* resposta nao-JSON tratada como erro abaixo */ }
+
+  // Tratamento de rate limit (429): aguarda o retry-after indicado pela API
+  // e tenta uma unica vez antes de desistir.
+  if (res.status === 429) {
+    const retryAfter = res.headers.get('retry-after');
+    const delayMs = retryAfter ? Number(retryAfter) * 1000 : 5000;
+    log(`Groq 429 rate limit: aguardando ${delayMs}ms antes de retry único`);
+    await new Promise((resolve) => setTimeout(resolve, delayMs));
+    try {
+      res = await fetch(`${GROQ.baseURL}/chat/completions`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${GROQ.apiKey}`,
+        },
+        body: JSON.stringify({
+          model: GROQ.model,
+          messages: [
+            { role: 'system', content: SYSTEM_PROMPT_DEEPSEEK },
+            { role: 'user', content: buildDeepSeekUserPrompt(opts) },
+          ],
+          temperature: 0.9,
+          max_tokens: 900,
+        }),
+        signal: controller.signal,
+      });
+    } finally {
+      clearTimeout(timer);
+    }
+    const raw2 = await res.text();
+    let payload2 = null;
+    try { payload2 = JSON.parse(raw2); } catch { /* tratado abaixo */ }
+    if (!res.ok) {
+      const motivo = payload2?.error?.message || payload2?.message || raw2.slice(0, 200);
+      throw new Error(`Groq respondeu ${res.status}: ${motivo}`);
+    }
+    const content2 = String(payload2?.choices?.[0]?.message?.content || '').trim();
+    if (!content2) throw new Error('Groq nao retornou conteudo apos retry');
+    const textoFinal = content2;
+    return processGroqResponse(textoFinal, opts);
+  }
+
   if (!res.ok) {
     const motivo = payload?.error?.message || payload?.message || raw.slice(0, 200);
     throw new Error(`Groq respondeu ${res.status}: ${motivo}`);
@@ -470,7 +512,11 @@ async function callGroq(opts, tema) {
 
   const content = String(payload?.choices?.[0]?.message?.content || '').trim();
   if (!content) throw new Error('Groq nao retornou conteudo');
+  return processGroqResponse(content, opts);
+}
 
+/** Processa a resposta de texto do Groq para o formato de retorno da funcao. */
+function processGroqResponse(content, opts) {
   if (opts.mode === 'next') {
     const { linha } = parseLyricPayload(content, 'next');
     if (!linha) throw new Error('Groq nao retornou a proxima linha');
@@ -488,7 +534,7 @@ async function callGroq(opts, tema) {
  * Gera letra com o Groq, com fallback para o gerador local.
  * Aceita string (tema) ou opts.
  * Esta funcao e chamada pela cadeia do generateLyricsDeepSeek
- * (DeepSeek -> NVIDIA -> Groq -> Local).
+ * (DeepSeek -> Groq -> NVIDIA -> Local).
  */
 export async function generateLyricsGroq(temaOuOpts = {}, extra = {}) {
   const opts = typeof temaOuOpts === 'string'

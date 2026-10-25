@@ -260,14 +260,16 @@ export function groqAvailable() {
 }
 
 /**
- * Groq - provedor de letras TERCIARIO (fallback do NVIDIA).
- * Quando DeepSeek e NVIDIA falharem, a cadeia tenta o Groq antes de cair
- * no gerador local de templates. Chave: https://groq.com/groq-cloud
+ * Groq - provedor de letras SECUNDARIO (fallback do DeepSeek).
+ * Quando o DeepSeek falhar, a cadeia tenta o Groq antes da NVIDIA.
+ * Chave: https://groq.com/groq-cloud
  */
 export const GROQ = {
   apiKey: (process.env.GROQ_API_KEY || '').trim(),
   baseURL: (process.env.GROQ_BASE_URL || 'https://api.groq.com/openai/v1').replace(/\/+$/, ''),
-  model: (process.env.GROQ_MODEL || 'llama3-groq-70b-8192-text-spec').trim(),
+  // llama-3.3-70b-versatile: 12.000 TPM (maior que o gpt-oss-120b que estourava 8.000 TPM).
+  // Alternativa mais leve: llama-3.1-8b-instant (6.000 TPM).
+  model: (process.env.GROQ_MODEL || 'llama-3.3-70b-versatile').trim(),
   timeoutMs: Number(process.env.GROQ_TIMEOUT_MS || 15000),
 };
 
