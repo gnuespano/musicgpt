@@ -503,15 +503,6 @@ const ARTIST_BLOCKLIST = new Map([
   ['billie eilish', 'dark pop, breathy vocals, intimate production, synth'],
 ]);
 
-function replaceArtistWithDescription(text) {
-  if (!text) return text;
-  const lower = String(text).toLowerCase();
-  for (const [artist, alternative] of ARTIST_BLOCKLIST) {
-    if (lower.includes(artist.toLowerCase())) return text.replace(artist, alternative);
-  }
-  return text;
-}
-
 function expandStyleLocal(style) {
   if (!style) return null;
   const trimmed = style.trim().toLowerCase();
@@ -530,7 +521,7 @@ export function buildSunoCaption({ prompt, style, styleFromText = false, genreLa
   const bits = [];
   const text = String(prompt || '').trim();
 
-  const textCleaned = replaceArtistWithDescription(text);
+  const textCleaned = text;
 
   let styleText = '';
   if (styleFromText || style) {

@@ -992,7 +992,7 @@ export function buildSunoCaption({ prompt, style, styleFromText = false, genreLa
   const bits = [];
   const text = String(prompt || '').trim();
 
-  const textCleaned = replaceArtistWithDescription(text);
+  const textCleaned = text;
 
   let styleText = '';
   if (styleFromText || style) {
