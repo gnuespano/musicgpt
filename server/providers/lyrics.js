@@ -758,7 +758,9 @@ const STYLE_EXPANSION_SYSTEM_PROMPT = 'Você é um especialista em estilos music
   + 'Responda APENAS com a descrição, sem aspas, sem introdução, sem explicações.';
 
 const STYLE_EXPANSION_USER_PROMPT = 'Gere uma descrição detalhada de estilo musical no formato Suno AI para o gênero: {gênero}. '
-  + 'Inclua instrumentos, BPM, tipo de vocal e clima. '
+  + 'Inclua instrumentos específicos, BPM, tipo de vocal e clima da produção. '
+  + 'IMPORTANTE: gere uma descrição ÚNICA e VARIADA a cada solicitação - nunca repita a mesma resposta para o mesmo gênero. '
+  + 'Variados instrumentos, BPM, arranjos e atmosferas de forma criativa. '
   + 'Responda apenas com a descrição.';
 
 /**
@@ -768,30 +770,37 @@ const STYLE_EXPANSION_USER_PROMPT = 'Gere uma descrição detalhada de estilo mu
  */
 export async function expandStyleWithAI(genre) {
   const genreLower = String(genre || '').trim().toLowerCase();
-  if (!genreLower) return null;
+  if (!genreLower) {
+    log('[estilo-ia] gênero vazio, retornando null');
+    return null;
+  }
+
+  log(`[estilo-ia] expandStyleWithAI chamado para gênero="${genreLower}"`);
 
   // Usa exclusivamente a NVIDIA Nemotron 3.5 Lightning
   if (nvidiaAvailable()) {
     try {
-      log('[estilo-ia] tentando gerar expansão com NVIDIA Nemotron 3.5 Lightning');
+      log('[estilo-ia] NVIDIA disponível, chamando API para expansão de estilo');
       const prompt = STYLE_EXPANSION_USER_PROMPT.replace('{gênero}', genreLower);
+      log(`[estilo-ia] prompt enviado à NVIDIA: "${prompt.slice(0, 120)}"`);
       const result = await callNvidiaForStyleExpansionWithNemotron(prompt);
-      log(`[estilo-ia] NVIDIA expandiu: "${result.slice(0, 80)}"`);
+      log(`[estilo-ia] NVIDIA retornou com SUCESSO: "${result.slice(0, 100)}"`);
       return result;
     } catch (err) {
-      log('[estilo-ia] NVIDIA fora: ' + primeiraLinha(err.message) + ' -> usando dicionário local');
+      log(`[estilo-ia] NVIDIA FALHOU: ${primeiraLinha(err.message)} -> usando dicionário local`);
     }
   } else {
-    log('[estilo-ia] NVIDIA_API_KEY ausente, usando dicionário local');
+    log('[estilo-ia] NVIDIA_API_KEY não configurada, usando dicionário local');
   }
 
   // Fallback: dicionário local
   const local = LOCAL_STYLE_EXPANSION_DICT.get(genreLower);
   if (local) {
-    log('[estilo-ia] usando dicionário local como fallback');
+    log(`[estilo-ia] usando dicionário local para gênero="${genreLower}": "${local.slice(0, 80)}"`);
     return local;
   }
 
+  log(`[estilo-ia] gênero="${genreLower}" não encontrado no dicionário local`);
   return null;
 
 /**
@@ -803,7 +812,7 @@ async function callNvidiaForStyleExpansionWithNemotron(prompt) {
   const model = 'nvidia/nemotron-3.5-lightning-30b-a3b';
   
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 8000);
+  const timer = setTimeout(() => controller.abort(), 15000);
   let res;
   try {
     res = await fetch('https://integrate.api.nvidia.com/v1/chat/completions', {
