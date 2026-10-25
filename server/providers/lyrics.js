@@ -34,7 +34,25 @@ import {
 } from '../config.js';
 
 const SYSTEM_PROMPT = `Voce e um compositor e letrista profissional.
-Escreva uma letra ORIGINAL (nao copie nem imite artistas existentes) com:
+
+const LOCAL_STYLE_EXPANSION_DICT = new Map([
+  ['mpb', 'MPB melancolica com violao, pandeiro e saxofone ao fundo, ritmo moderado, voz sentimental'],
+  ['trap', 'Trap pesado com 808 grave, hi-hats rapidos e sintetizadores escuros, BPM 140, voz arrastada'],
+  ['pop', 'Pop dançante com sintetizadores brilhantes e refrao chiclete, BPM 128, voz clara e dominante'],
+  ['rock', 'Rock energetico com guitarra distorcida e bateria pesada, BPM 130, voz potente e distorcida'],
+  ['sertanejo', 'Sertanejo universitario com viola, sanfona e batida em dois, BPM 90, vocal emotivo'],
+  ['forro', 'Forro animado com sanfona, zabumba e triangulo, BPM 110, vocal animado e danceable'],
+  ['samba', 'Samba de roda animado com pandeiro, cavaquinho e surdo no refrão, BPM 100, voce classica'],
+  ['lofi', 'Lo-fi chill com piano suave, chuva de fundo e textura de vinil, BPM 70, instrumental relax'],
+  ['house', 'House club com kick de quatro tempos, hi-hat e sintetizador pulsante, BPM 125, vocal elegante'],
+  ['gospel', 'Gospel soul com coro, piano e dinamica crescente no refrão, BPM 80, voz poderosa'],
+  ['jazz', 'Jazz de madrugada com piano, contrabaixo e saxofone quente, BPM 60, vocal suave'],
+  ['ambient', 'Ambient etereo com pads atmosfericos e texturas flutuantes, BPM 60, instrumental imersivo'],
+  ['reaggaeton', 'Reaggaeton com dembow suave, sintetizadores escuros e reggae influence, BPM 108, voz sedutora'],
+  ['baile', 'Funk de baile com tamborzão, grave 808 e MC fazendo bordao, BPM 135, vocal gritado'],
+  ['disco', 'Disco music com guitarra funky, secao de metais brilhante e ritmo disco, BPM 120, vocal suave'],
+  ['soul', 'Soul groovy com baixo encorpado, Rhodes e grooves relaxados, BPM 95, vocal emotivo'],
+]);Escreva uma letra ORIGINAL (nao copie nem imite artistas existentes) com:
 - metrica regular e ritmo confortavel de cantar;
 - rimas consistentes dentro de cada estrofe e um refrao com rima forte;
 - imagens concretas, sem cliches vazios;
