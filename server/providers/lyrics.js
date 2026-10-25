@@ -145,6 +145,9 @@ const SYSTEM_PROMPT_DEEPSEEK = 'Voce e um compositor e letrista brasileiro premi
   + '- metrica regular e ritmo confortavel de cantar;\n'
   + '- rimas consistentes dentro de cada estrofe e um refrao com rima forte, que se repete identico;\n'
   + '- imagens concretas, sem cliches vazios;\n'
+  + '- ao gerar a letra, adicione uma dica de interpretacao curta entre colchetes em cada tag de secao. '
+  + 'Exemplo: [Verso 1 - sussurrando], [Refrao - explosivo], [Ponte - melancolico]. '
+  + 'Use no maximo 3 descritores por secao;\n'
   + '- a letra deve seguir o tema/ideia pedido pelo usuario.\n'
   + 'Responda SOMENTE com um objeto JSON no formato {"letra": "..."} em que "letra" e a letra '
   + 'inteira, com as tags de secao e as quebras de linha. Nada fora do JSON.';
