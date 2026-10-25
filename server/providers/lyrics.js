@@ -986,3 +986,61 @@ async function retryWithBackoff(fn, provider = 'nvidia') {
   
   throw lastError;
 }
+
+
+export function buildSunoCaption({ prompt, style, styleFromText = false, genreLabel, moodLabel, lofi, instrumental, duration }) {
+  const bits = [];
+  const text = String(prompt || '').trim();
+
+  const textCleaned = replaceArtistWithDescription(text);
+
+  let styleText = '';
+  if (styleFromText || style) {
+    styleText = String(style || '').trim();
+  } else if (genreLabel) {
+    styleText = genreLabel;
+  }
+
+  if (styleText && !styleFromText) {
+    const expanded = expandStyleLocal(styleText);
+    if (expanded) {
+      styleText = expanded;
+    }
+  }
+
+  const vocalDesc = textCleaned ? `${textCleaned}, ` : '';
+
+  let genreInstrumentation = '';
+  if (styleText) {
+    genreInstrumentation = styleText;
+  } else if (genreLabel) {
+    genreInstrumentation = genreLabel;
+  }
+
+  const moodDesc = moodLabel ? `${moodLabel} mood, ` : '';
+  const lofiDesc = lofi ? 'lo-fi, vinyl crackle, soft and warm, ' : '';
+  const instrDesc = instrumental ? 'instrumental, no vocals, ' : '';
+
+  if (Number.isFinite(Number(duration)) && Number(duration) > 0) {
+    bits.push(`${Math.round(Number(duration))} seconds`);
+  }
+
+  const vocalBit = vocalDesc.length > 0 ? vocalDesc.slice(0, -2) : '';
+  const genreBit = genreInstrumentation ? genreInstrumentation : 'music';
+  const moodBit = moodDesc.length > 0 ? moodDesc.slice(0, -2) : '';
+  const lofiBit = lofiDesc.length > 0 ? lofiDesc.slice(0, -2) : '';
+  const instrBit = instrDesc.length > 0 ? instrDesc.slice(0, -2) : '';
+
+  const nonEmptyBits = [vocalBit, genreBit, moodBit, lofiBit, instrBit]
+    .filter((b) => b.length > 0);
+
+  if (nonEmptyBits.length >= 2) {
+    const vocal = nonEmptyBits[0];
+    const rest = nonEmptyBits.slice(1).join(', ');
+    return `${vocal}. ${rest}`;
+  }
+
+  return nonEmptyBits[0] || 'instrumental track';
+}
+
+// Remove: export const LYRIC_THEMES = [...Object.keys(THEMES), 'livre', 'en'];

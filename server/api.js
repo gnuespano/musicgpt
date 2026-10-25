@@ -15,7 +15,7 @@ import {
   mainLyricsProvider,
   PROVIDERS,
 } from './config.js';
-import { generateLyricsWithProvider, generateMusicStyle, expandStyleWithAI } from './providers/lyrics.js';
+import { generateLyricsWithProvider, generateMusicStyle, expandStyleWithAI, buildSunoCaption } from './providers/lyrics.js';
 import { generateMusic } from './providers/music.js';
 import { aceStepStatus, normalizeAudioMode } from './providers/acestep.js';
 import { generateLyrics as generateLocalLyrics, lyricTheme } from './lyrics.js';
@@ -139,95 +139,6 @@ const ARTIST_BLOCKLIST = new Map([
   ['ed sheeran', 'pop-acoustic, guitar, melodic, mainstream pop'],
   ['billie eilish', 'dark pop, breathy vocals, intimate production, synth'],
 ]);
-
-function detectArtistBlocklist(text) {
-  if (!text) return null;
-  const lower = String(text).toLowerCase();
-  for (const [artist, alternative] of ARTIST_BLOCKLIST) {
-    if (lower.includes(artist.toLowerCase())) return artist;
-  }
-  return null;
-}
-
-function replaceArtistWithDescription(text) {
-  if (!text) return text;
-  const artist = detectArtistBlocklist(text);
-  if (artist) {
-    const alternative = ARTIST_BLOCKLIST.get(artist);
-    const regex = new RegExp(artist, 'gi');
-    return text.replace(regex, alternative);
-  }
-  return text;
-}
-
-function expandStyleLocal(style) {
-  if (!style) return null;
-  const trimmed = style.trim().toLowerCase();
-  const local = STYLE_EXPANSION_DICT.get(trimmed);
-  if (local) return local;
-  const expansions = {
-    'rock': 'rock guitar, drums, bass, energetic vocals',
-    'pop': 'pop, synthesizers, catchy melody, clear vocals',
-    'mpb': 'brazilian popular music, acoustic guitar, subtle percussion',
-    'lofi': 'lo-fi, piano, vinyl crackle, atmospheric',
-  };
-  return expansions[trimmed] || null;
-}
-
-function buildSunoCaption({ prompt, style, styleFromText = false, genreLabel, moodLabel, lofi, instrumental, duration }) {
-  const bits = [];
-  const text = String(prompt || '').trim();
-
-  const textCleaned = replaceArtistWithDescription(text);
-
-  let styleText = '';
-  if (styleFromText || style) {
-    styleText = String(style || '').trim();
-  } else if (genreLabel) {
-    styleText = genreLabel;
-  }
-
-  if (styleText && !styleFromText) {
-    const expanded = expandStyleLocal(styleText);
-    if (expanded) {
-      styleText = expanded;
-    }
-  }
-
-  const vocalDesc = textCleaned ? `${textCleaned}, ` : '';
-
-  let genreInstrumentation = '';
-  if (styleText) {
-    genreInstrumentation = styleText;
-  } else if (genreLabel) {
-    genreInstrumentation = genreLabel;
-  }
-
-  const moodDesc = moodLabel ? `${moodLabel} mood, ` : '';
-  const lofiDesc = lofi ? 'lo-fi, vinyl crackle, soft and warm, ' : '';
-  const instrDesc = instrumental ? 'instrumental, no vocals, ' : '';
-
-  if (Number.isFinite(Number(duration)) && Number(duration) > 0) {
-    bits.push(`${Math.round(Number(duration))} seconds`);
-  }
-
-  const vocalBit = vocalDesc.length > 0 ? vocalDesc.slice(0, -2) : '';
-  const genreBit = genreInstrumentation ? genreInstrumentation : 'music';
-  const moodBit = moodDesc.length > 0 ? moodDesc.slice(0, -2) : '';
-  const lofiBit = lofiDesc.length > 0 ? lofiDesc.slice(0, -2) : '';
-  const instrBit = instrDesc.length > 0 ? instrDesc.slice(0, -2) : '';
-
-  const nonEmptyBits = [vocalBit, genreBit, moodBit, lofiBit, instrBit]
-    .filter((b) => b.length > 0);
-
-  if (nonEmptyBits.length >= 2) {
-    const vocal = nonEmptyBits[0];
-    const rest = nonEmptyBits.slice(1).join(', ');
-    return `${vocal}. ${rest}`;
-  }
-
-  return nonEmptyBits[0] || 'instrumental track';
-}
 
 function getGenreMixLabels(genreKey, styleFromText, bodyGenreMix) {
   let genreMix = genreKey;

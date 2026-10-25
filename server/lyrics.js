@@ -465,4 +465,120 @@ export function generateLyrics(opts = {}) {
   return { text, theme: themeName, sections: SECTION_PLAN.map((s) => s.tag) };
 }
 
+const STYLE_EXPANSION_DICT = new Map([
+  ['mpb', 'MPB melancólica com violão, pandeiro e saxofone ao fundo, ritmo moderado, voz sentimental'],
+  ['trap', 'Trap pesado com 808 grave, hi-hats rápidos e sintetizadores escuros, BPM 140, voz arrastada'],
+  ['pop', 'Pop dançante com sintetizadores brilhantes e refrão chiclete, BPM 128, voz clara e dominante'],
+  ['rock', 'Rock energético com guitarra distorcida e bateria pesada, BPM 130, voz potente e distorcida'],
+  ['sertanejo', 'Sertanejo universitário com viola, sanfona e batida em dois, BPM 90, vocal emocional'],
+  ['forro', 'Forró animado com sanfona, zabumba e triângulo, BPM 110, vocal animado e danceable'],
+  ['samba', 'Samba de roda animado com pandeiro, cavaquinho e surdo no refrão, BPM 100, voz clássica'],
+  ['lofi', 'Lo-fi chill com piano suave, chuva de fundo e textura de vinil, BPM 70, instrumental relax'],
+  ['house', 'House club com kick de quatro tempos, hi-hat e sintetizador pulsante, BPM 125, vocal elegante'],
+  ['gospel', 'Gospel soul com coro, piano e dinâmica crescente no refrão, BPM 80, voz poderosa'],
+  ['jazz', 'Jazz de madrugada com piano, contrabaixo e saxofone quente, BPM 60, vocal suave'],
+  ['ambient', 'Ambient etéreo com pads atmosféricos e texturas flutuantes, BPM 60, instrumental imersivo'],
+  ['reaggaeton', 'Reaggaeton com dembow suave, sintetizadores escuros e reggae influence, BPM 108, voz sedutora'],
+  ['baile', 'Funk de baile com tamborzão, grave 808 e MC fazendo bordão, BPM 135, vocal gritado'],
+  ['disco', 'Disco music com guitarra funky, seção de metais brilhante e ritmo disco, BPM 120, vocal suave'],
+  ['soul', 'Soul groovy com baixo encorpado, Rhodes e grooves relaxados, BPM 95, vocal emotivo'],
+]);
+
+const ARTIST_BLOCKLIST = new Map([
+  ['taylor swift', 'female vocalist, storytelling lyrics, pop ballad, acoustic guitar'],
+  ['the beatles', 'classic rock, mellow vocals, harmony guitars, studio recordings'],
+  ['queen', 'rock opera, multi-part harmonies, piano, dramatic dynamics'],
+  ['dr dre', 'hip hop, heavy beats, production, G-funk, deep bass'],
+  ['eminem', 'rap, lyrical, aggressive, storytelling, vocal delivery'],
+  ['radiohead', 'alternative rock, experimental, atmospheric, art rock'],
+  ['dave brubeck', 'jazz, cool jazz, piano, unconventional time signatures'],
+  ['bob marley', 'reggae, Rastafari, acoustic guitar, steady rhythm'],
+  ['madonna', 'pop, dance, electronic, prominent vocals, production'],
+  ['michael jackson', 'pop, vocal production, beatbox, dance rhythm'],
+  ['prince', 'funk, guitar, psychedelic, eclectic production'],
+  ['bruce springsteen', 'heartland rock, storytelling, acoustic guitar, band arrangement'],
+  ['adele', 'pop ballad, powerful vocals, piano, emotional delivery'],
+  ['beyonce', 'R&B, pop, powerful vocals, choreography, production'],
+  ['ed sheeran', 'pop-acoustic, guitar, melodic, mainstream pop'],
+  ['billie eilish', 'dark pop, breathy vocals, intimate production, synth'],
+]);
+
+function replaceArtistWithDescription(text) {
+  if (!text) return text;
+  const lower = String(text).toLowerCase();
+  for (const [artist, alternative] of ARTIST_BLOCKLIST) {
+    if (lower.includes(artist.toLowerCase())) return text.replace(artist, alternative);
+  }
+  return text;
+}
+
+function expandStyleLocal(style) {
+  if (!style) return null;
+  const trimmed = style.trim().toLowerCase();
+  const local = STYLE_EXPANSION_DICT.get(trimmed);
+  if (local) return local;
+  const expansions = {
+    'rock': 'rock guitar, drums, bass, energetic vocals',
+    'pop': 'pop, synthesizers, catchy melody, clear vocals',
+    'mpb': 'brazilian popular music, acoustic guitar, subtle percussion',
+    'lofi': 'lo-fi, piano, vinyl crackle, atmospheric',
+  };
+  return expansions[trimmed] || null;
+}
+
+export function buildSunoCaption({ prompt, style, styleFromText = false, genreLabel, moodLabel, lofi, instrumental, duration }) {
+  const bits = [];
+  const text = String(prompt || '').trim();
+
+  const textCleaned = replaceArtistWithDescription(text);
+
+  let styleText = '';
+  if (styleFromText || style) {
+    styleText = String(style || '').trim();
+  } else if (genreLabel) {
+    styleText = genreLabel;
+  }
+
+  if (styleText && !styleFromText) {
+    const expanded = expandStyleLocal(styleText);
+    if (expanded) {
+      styleText = expanded;
+    }
+  }
+
+  const vocalDesc = textCleaned ? `${textCleaned}, ` : '';
+
+  let genreInstrumentation = '';
+  if (styleText) {
+    genreInstrumentation = styleText;
+  } else if (genreLabel) {
+    genreInstrumentation = genreLabel;
+  }
+
+  const moodDesc = moodLabel ? `${moodLabel} mood, ` : '';
+  const lofiDesc = lofi ? 'lo-fi, vinyl crackle, soft and warm, ' : '';
+  const instrDesc = instrumental ? 'instrumental, no vocals, ' : '';
+
+  if (Number.isFinite(Number(duration)) && Number(duration) > 0) {
+    bits.push(`${Math.round(Number(duration))} seconds`);
+  }
+
+  const vocalBit = vocalDesc.length > 0 ? vocalDesc.slice(0, -2) : '';
+  const genreBit = genreInstrumentation ? genreInstrumentation : 'music';
+  const moodBit = moodDesc.length > 0 ? moodDesc.slice(0, -2) : '';
+  const lofiBit = lofiDesc.length > 0 ? lofiDesc.slice(0, -2) : '';
+  const instrBit = instrDesc.length > 0 ? instrDesc.slice(0, -2) : '';
+
+  const nonEmptyBits = [vocalBit, genreBit, moodBit, lofiBit, instrBit]
+    .filter((b) => b.length > 0);
+
+  if (nonEmptyBits.length >= 2) {
+    const vocal = nonEmptyBits[0];
+    const rest = nonEmptyBits.slice(1).join(', ');
+    return `${vocal}. ${rest}`;
+  }
+
+  return nonEmptyBits[0] || 'instrumental track';
+}
+
 export const LYRIC_THEMES = [...Object.keys(THEMES), 'livre', 'en'];
