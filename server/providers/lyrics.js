@@ -804,12 +804,12 @@ export async function expandStyleWithAI(genre) {
   return null;
 
 /**
- * Chama a NVIDIA Nemotron 3.5 Lightning para expansão de estilo.
- * Usa a chave nvapi-... e o modelo nvidia/nemotron-3.5-lightning-30b-a3b.
+ * Chama a NVIDIA Nemotron 3.5 para expansão de estilo.
+ * Usa a chave nvapi-... e o modelo nvidia/nemotron-3-120b-a12b.
  */
 async function callNvidiaForStyleExpansionWithNemotron(prompt) {
-  // Modelo específico Nemotron 3.5 Lightning
-  const model = 'nvidia/nemotron-3.5-lightning-30b-a3b';
+  // Modelo específico Nemotron 3.5 (não focado em raciocínio pesado)
+  const model = 'nvidia/nemotron-3-120b-a12b';
   
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 15000);
@@ -828,7 +828,7 @@ async function callNvidiaForStyleExpansionWithNemotron(prompt) {
           { role: 'user', content: prompt },
         ],
         temperature: 1.1,
-        max_tokens: 150,
+        max_tokens: 2500,
       }),
       signal: controller.signal,
     });
@@ -856,7 +856,8 @@ async function callNvidiaForStyleExpansionWithNemotron(prompt) {
 
   const clean = content.replace(/^["'`]+|["'`]+$/g, '').replace(/\.+$/, '').trim();
   log('NVIDIA Nemotron devolveu estilo expandido: "' + content.slice(0, 80) + '"');
-  return clean}
+  return clean;
+}
 }
 
 /**
