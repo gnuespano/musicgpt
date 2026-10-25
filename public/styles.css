@@ -568,6 +568,24 @@ code { background: #0e0e15; border: 1px solid var(--line); border-radius: 5px; p
 .icon-btn.wand-ai svg { width: 17px; height: 17px; }
 .icon-btn.wand-ai.is-busy { opacity: .6; pointer-events: none; }
 
+/* spinner da lampada enquanto gera a letra via IA */
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+.icon-btn.wand-ai .spinner {
+  display: none;
+  position: absolute;
+  inset: 50%;
+  width: 14px; height: 14px;
+  margin: -7px 0 0 -7px;
+  border: 2px solid rgba(255,255,255,.35);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: spin .8s linear infinite;
+}
+.icon-btn.wand-ai.is-loading { pointer-events: none; opacity: .75; }
+.icon-btn.wand-ai.is-loading .spinner { display: block; }
+
 /* varinha magica: brilho + fade no campo preenchido e no botao clicado */
 @keyframes magicGlow {
   0%   { opacity: .25; transform: scale(.985); box-shadow: 0 0 0 0 rgba(180, 108, 255, 0); }

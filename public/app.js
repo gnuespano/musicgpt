@@ -1654,6 +1654,10 @@ function bind() {
    * ela so sorteia o tema (ver o listener dela logo abaixo).
    */
   async function gerarLetra({ tema, btn }) {
+    const spinner = $('#btnLyricAISpinner');
+    btn.disabled = true;
+    btn.classList.add('is-loading');
+    if (spinner) spinner.style.display = 'block';
     btn.classList.add('is-busy');
     try {
       const res = await api('/api/lyrics', {
@@ -1668,6 +1672,9 @@ function bind() {
       toast(`${labelLetra(res)}.`, 'ok');
       return texto;
     } finally {
+      btn.disabled = false;
+      btn.classList.remove('is-loading');
+      if (spinner) spinner.style.display = 'none';
       btn.classList.remove('is-busy');
     }
   }
