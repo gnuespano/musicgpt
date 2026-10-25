@@ -808,8 +808,9 @@ export async function expandStyleWithAI(genre) {
  * Usa a chave nvapi-... e o modelo nvidia/nemotron-3-120b-a12b.
  */
 async function callNvidiaForStyleExpansionWithNemotron(prompt) {
-  // Modelo específico Nemotron 3.5 (não focado em raciocínio pesado)
-  const model = 'nvidia/nemotron-3-120b-a12b';
+  // Modelo específico Nemotron 3.5 Lightning (validação: retorna 200 com conteúdo real;
+  // nvidia/nemotron-3-120b-a12b retorna 404 - não existe neste endpoint)
+  const model = 'nvidia/nemotron-3.5-lightning-30b-a3b';
   
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 15000);
