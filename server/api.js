@@ -558,7 +558,7 @@ async function executeJob(job, options, referenceAudio = null) {
     // adiciona performance cues por defeito (Suno Engineer)
     const finalLyrics = options.instrumental
       ? ''
-      : addPerformanceCues(rawLyrics);
+      : rawLyrics;
     // modo Natural Language: o ACE-Step expandiu o tema, mas nem sempre
     // devolve a letra escrita no `content` - avisamos em vez de deixar
     // a faixa silenciosa sobre o assunto.
