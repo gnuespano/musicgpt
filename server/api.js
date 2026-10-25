@@ -15,7 +15,7 @@ import {
   mainLyricsProvider,
   PROVIDERS,
 } from './config.js';
-import { generateLyricsWithProvider, generateMusicStyle, expandStyleWithAI, buildSunoCaption } from './providers/lyrics.js';
+import { generateLyricsWithProvider, generateMusicStyle, expandStyleWithAI, buildSunoCaption, LOCAL_STYLE_EXPANSION_DICT } from './providers/lyrics.js';
 import { generateMusic } from './providers/music.js';
 import { aceStepStatus, normalizeAudioMode } from './providers/acestep.js';
 import { generateLyrics as generateLocalLyrics, lyricTheme } from './lyrics.js';
