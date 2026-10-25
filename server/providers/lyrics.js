@@ -727,44 +727,92 @@ const STYLE_EXPANSION_USER_PROMPT = 'Gere uma descrição detalhada de estilo mu
   + 'Responda apenas com a descrição.';
 
 /**
- * Expande um gênero musical curto usando IA (NVIDIA NIM ou Groq).
+ * Expande um gênero musical usando exclusivamente a NVIDIA Nemotron 3.5 Lightning.
  * Retorna a descrição expandida ou null em caso de erro.
+ * O dicionário local serve apenas como fallback se a API falhar.
  */
 export async function expandStyleWithAI(genre) {
   const genreLower = String(genre || '').trim().toLowerCase();
   if (!genreLower) return null;
 
-  // Tenta NVIDIA primeiro
+  // Usa exclusivamente a NVIDIA Nemotron 3.5 Lightning
   if (nvidiaAvailable()) {
     try {
-      log('[estilo-ia] tentando gerar expansão com NVIDIA NIM');
+      log('[estilo-ia] tentando gerar expansão com NVIDIA Nemotron 3.5 Lightning');
       const prompt = STYLE_EXPANSION_USER_PROMPT.replace('{gênero}', genreLower);
-      const result = await callNvidiaForStyleExpansion(prompt);
+      const result = await callNvidiaForStyleExpansionWithNemotron(prompt);
       log(`[estilo-ia] NVIDIA expandiu: "${result.slice(0, 80)}"`);
       return result;
     } catch (err) {
-      log(`[estilo-ia] NVIDIA fora: ${primeiraLinha(err.message)} -> tentando Groq`);
+      log('[estilo-ia] NVIDIA fora: ' + primeiraLinha(err.message) + ' -> usando dicionário local');
     }
   } else {
-    log('[estilo-ia] NVIDIA_API_KEY ausente, pulando para Groq');
+    log('[estilo-ia] NVIDIA_API_KEY ausente, usando dicionário local');
   }
 
-  // Fallback para Groq
-  if (groqAvailable()) {
-    try {
-      log('[estilo-ia] tentando gerar expansão com Groq');
-      const prompt = STYLE_EXPANSION_USER_PROMPT.replace('{gênero}', genreLower);
-      const result = await callGroqForStyleExpansion(prompt);
-      log(`[estilo-ia] Groq expandiu: "${result.slice(0, 80)}"`);
-      return result;
-    } catch (err) {
-      log(`[estilo-ia] Groq fora: ${primeiraLinha(err.message)} -> usando local`);
-    }
-  } else {
-    log('[estilo-ia] GROQ_API_KEY ausente, usando lista local');
+  // Fallback: dicionário local
+  const local = LOCAL_STYLE_EXPANSION_DICT.get(genreLower);
+  if (local) {
+    log('[estilo-ia] usando dicionário local como fallback');
+    return local;
   }
 
   return null;
+
+/**
+ * Chama a NVIDIA Nemotron 3.5 Lightning para expansão de estilo.
+ * Usa a chave nvapi-... e o modelo nvidia/nemotron-3.5-lightning-30b-a3b.
+ */
+async function callNvidiaForStyleExpansionWithNemotron(prompt) {
+  // Modelo específico Nemotron 3.5 Lightning
+  const model = 'nvidia/nemotron-3.5-lightning-30b-a3b';
+  
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 8000);
+  let res;
+  try {
+    res = await fetch('https://integrate.api.nvidia.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: 'Bearer ' + NVIDIA.apiKey,
+      },
+      body: JSON.stringify({
+        model: model,
+        messages: [
+          { role: 'system', content: STYLE_EXPANSION_SYSTEM_PROMPT },
+          { role: 'user', content: prompt },
+        ],
+        temperature: 1.1,
+        max_tokens: 150,
+      }),
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timer);
+  }
+
+  const raw = await res.text();
+  let payload = null;
+  try { payload = JSON.parse(raw); } catch { /* tratado abaixo */ }
+  if (!res.ok) {
+    const motivo = payload?.error?.message || payload?.message || raw.slice(0, 200);
+    throw new Error('NVIDIA respondeu ' + res.status + ': ' + motivo);
+  }
+
+  const msg = payload?.choices?.[0]?.message || {};
+  const content = String(msg.content || '').trim();
+  if (!content) {
+    const raciocinio = String(msg.reasoning_content || '').trim();
+    if (raciocinio) {
+      throw new Error('NVIDIA só devolveu raciocínio, sem conteúdo');
+    }
+    throw new Error('NVIDIA não retornou conteúdo');
+  }
+
+  const clean = content.replace(/^["'`]+|["'`]+$/g, '').replace(/\.+$/, '').trim();
+  log('NVIDIA Nemotron devolveu estilo expandido: "' + content.slice(0, 80) + '"');
+  return clean}
 }
 
 /**

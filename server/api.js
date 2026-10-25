@@ -116,6 +116,242 @@ function isShortStyle(style) {
   if (trimmed.includes(' ')) return false;
   // Must be in the known genre words set
   return GENRE_WORDS.has(trimmed.toLowerCase());
+/**
+ * Blocklist de nomes de artistas - NUNCA use nomes reais em prompts Suno.
+ * A API do Suno rewroteia eles e o plugin bloqueia antes disso.
+ * Cada entrada tem "Say Instead" com descricao sonora alternativa.
+ */
+const ARTIST_BLOCKLIST = new Map([
+  ['taylor swift', 'female vocalist, storytelling lyrics, pop ballad, acoustic guitar'],
+  ['the beatles', 'classic rock, mellow vocals, harmony guitars, studio recordings'],
+  ['queen', 'rock opera, multi-part harmonies, piano, dramatic dynamics'],
+  ['dr dre', 'hip hop, heavy beats, production, G-funk, deep bass'],
+  ['eminem', 'rap, lyrical, aggressive, storytelling, vocal delivery'],
+  ['radiohead', 'alternative rock, experimental, atmospheric, art rock'],
+  ['dave brubeck', 'jazz, cool jazz, piano, unconventional time signatures'],
+  ['bob marley', 'reggae, Rastafari, acoustic guitar, steady rhythm'],
+  ['madonna', 'pop, dance, electronic, prominent vocals, production'],
+  ['michael jackson', 'pop, vocal production, beatbox, dance rhythm'],
+  ['prince', 'funk, guitar, psychedelic, eclectic production'],
+  ['bruce springsteen', 'heartland rock, storytelling, acoustic guitar, band arrangement'],
+  ['adele', 'pop ballad, powerful vocals, piano, emotional delivery'],
+  ['beyonce', 'R&B, pop, powerful vocals, choreography, production'],
+  ['ed sheeran', 'pop-acoustic, guitar, melodic, mainstream pop'],
+  ['billie eilish', 'dark pop, breathy vocals, intimate production, synth'],
+]);
+
+function detectArtistBlocklist(text) {
+  if (!text) return null;
+  const lower = String(text).toLowerCase();
+  for (const [artist, alternative] of ARTIST_BLOCKLIST) {
+    if (lower.includes(artist.toLowerCase())) return artist;
+  }
+  return null;
+}
+
+function replaceArtistWithDescription(text) {
+  if (!text) return text;
+  const artist = detectArtistBlocklist(text);
+  if (artist) {
+    const alternative = ARTIST_BLOCKLIST.get(artist);
+    const regex = new RegExp(artist, 'gi');
+    return text.replace(regex, alternative);
+  }
+  return text;
+}
+
+function expandStyleLocal(style) {
+  if (!style) return null;
+  const trimmed = style.trim().toLowerCase();
+  const local = STYLE_EXPANSION_DICT.get(trimmed);
+  if (local) return local;
+  const expansions = {
+    'rock': 'rock guitar, drums, bass, energetic vocals',
+    'pop': 'pop, synthesizers, catchy melody, clear vocals',
+    'mpb': 'brazilian popular music, acoustic guitar, subtle percussion',
+    'lofi': 'lo-fi, piano, vinyl crackle, atmospheric',
+  };
+  return expansions[trimmed] || null;
+}
+
+function buildSunoCaption({ prompt, style, styleFromText = false, genreLabel, moodLabel, lofi, instrumental, duration }) {
+  const bits = [];
+  const text = String(prompt || '').trim();
+
+  const textCleaned = replaceArtistWithDescription(text);
+
+  let styleText = '';
+  if (styleFromText || style) {
+    styleText = String(style || '').trim();
+  } else if (genreLabel) {
+    styleText = genreLabel;
+  }
+
+  if (styleText && !styleFromText) {
+    const expanded = expandStyleLocal(styleText);
+    if (expanded) {
+      styleText = expanded;
+    }
+  }
+
+  const vocalDesc = textCleaned ? `${textCleaned}, ` : '';
+
+  let genreInstrumentation = '';
+  if (styleText) {
+    genreInstrumentation = styleText;
+  } else if (genreLabel) {
+    genreInstrumentation = genreLabel;
+  }
+
+  const moodDesc = moodLabel ? `${moodLabel} mood, ` : '';
+  const lofiDesc = lofi ? 'lo-fi, vinyl crackle, soft and warm, ' : '';
+  const instrDesc = instrumental ? 'instrumental, no vocals, ' : '';
+
+  if (Number.isFinite(Number(duration)) && Number(duration) > 0) {
+    bits.push(`${Math.round(Number(duration))} seconds`);
+  }
+
+  const vocalBit = vocalDesc.length > 0 ? vocalDesc.slice(0, -2) : '';
+  const genreBit = genreInstrumentation ? genreInstrumentation : 'music';
+  const moodBit = moodDesc.length > 0 ? moodDesc.slice(0, -2) : '';
+  const lofiBit = lofiDesc.length > 0 ? lofiDesc.slice(0, -2) : '';
+  const instrBit = instrDesc.length > 0 ? instrDesc.slice(0, -2) : '';
+
+  const nonEmptyBits = [vocalBit, genreBit, moodBit, lofiBit, instrBit]
+    .filter((b) => b.length > 0);
+
+  if (nonEmptyBits.length >= 2) {
+    const vocal = nonEmptyBits[0];
+    const rest = nonEmptyBits.slice(1).join(', ');
+    return `${vocal}. ${rest}`;
+  }
+
+  return nonEmptyBits[0] || 'instrumental track';
+}
+
+function getGenreMixLabels(genreKey, styleFromText, bodyGenreMix) {
+  let genreMix = genreKey;
+  let genreMixLabels = genreKey;
+  if (!styleFromText && bodyGenreMix && Array.isArray(bodyGenreMix)) {
+    const selected = bodyGenreMix.filter((g) => GENRES[g]).slice(0, 3);
+    if (selected.length >= 2) {
+      genreMix = selected.join(', ');
+      genreMixLabels = selected.map((g) => GENRES[g] ? GENRES[g].label : g).join(', ');
+    }
+  }
+  return { genreMix, genreMixLabels };
+}
+
+/**
+ * Adiciona Performance Cues às seções da letra.
+ * Suno Engineer: append a brief delivery-cue phrase (a word or two) directly
+ * to each structure tag ([Verse 1 - cold regal], [Bridge - raw breaking]).
+ * Default, not optional - faz isso para toda faixa.
+ * Máximo 3 bracketed descriptors por seção (cues + accent <= 3).
+ */
+function addPerformanceCues(lyricsText) {
+  if (!lyricsText) return lyricsText;
+
+  const SECTION_TAG_RE = /^\s*\[[^\]]{1,40}\]\s*$/;
+  const lines = lyricsText.split('\n');
+  const result = [];
+  let currentSection = null;
+  let cuesInSection = 0;
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+
+    if (SECTION_TAG_RE.test(trimmed)) {
+      if (currentSection) {
+        const mainCue = currentSection.cues.length > 0 ? currentSection.cues[0] : '';
+        const tagWithCue = `${currentSection.tagName} ${mainCue}`.trim();
+        result.push(tagWithCue);
+      } else {
+        result.push(trimmed);
+      }
+      currentSection = { tagName: trimmed, cues: [] };
+      cuesInSection = 0;
+      continue;
+    }
+
+    if (currentSection) {
+      const cueMatch = trimmed.match(/^\s*\[([^\]]+)\]\s*(.*)$/);
+      if (cueMatch) {
+        const cueText = cueMatch[1].trim();
+        const rest = cueMatch[2].trim();
+        if (cueText && cuesInSection < 3) {
+          currentSection.cues.push(cueText);
+          cuesInSection++;
+          currentSection.lines.push(rest || cueText);
+        } else if (cueText) {
+          currentSection.lines.push(trimmed);
+        } else {
+          currentSection.lines.push(trimmed);
+        }
+        continue;
+      }
+
+      const innerCueMatch = trimmed.match(/\[([^\]]+)\]/);
+      if (innerCueMatch && currentSection.cues.length < 3 - cuesInSection) {
+        const cueText = innerCueMatch[1].trim();
+        if (cueText) {
+          currentSection.cues.push(cueText);
+          cuesInSection++;
+          const cleaned = trimmed.replace(/\[[^\]]+\]/, '').trim();
+          currentSection.lines.push(cleaned);
+          continue;
+        }
+      }
+
+      currentSection.lines.push(trimmed);
+    } else {
+      result.push(trimmed);
+    }
+  }
+
+  if (currentSection) {
+    const mainCue = currentSection.cues.length > 0 ? currentSection.cues[0] : '';
+    const tagWithCue = `${currentSection.tagName} ${mainCue}`.trim();
+    result.push(tagWithCue);
+  }
+
+  const sectionTagRe = /^(\s*)(\[[^\]]+\])(\s*)$/;
+  const formattedLines = [];
+  let currentSectionTag = null;
+  let sectionCueCount = 0;
+
+  for (const line of result) {
+    const tagMatch = line.match(sectionTagRe);
+    if (tagMatch) {
+      if (currentSectionTag) {
+        if (sectionCueCount < 3) {
+          const lastLine = formattedLines[formattedLines.length - 1];
+          if (lastLine && !lastLine.includes('[')) {
+            formattedLines[formattedLines.length - 1] = lastLine + ` [${currentSectionTag}]`;
+            sectionCueCount++;
+          }
+        }
+      }
+      currentSectionTag = tagMatch[2];
+      sectionCueCount = 0;
+      formattedLines.push(line);
+    } else {
+      formattedLines.push(line);
+    }
+  }
+
+  if (currentSectionTag && sectionCueCount < 3) {
+    const lastIdx = formattedLines.length - 1;
+    if (lastIdx >= 0) {
+      const lastLine = formattedLines[lastIdx];
+      if (!lastLine.includes(currentSectionTag.replace('[', ']').replace(']', ''))) {
+        formattedLines[lastIdx] = lastLine + ` [${currentSectionTag}]`;
+      }
+    }
+  }
+
+  return formattedLines.join('\n');
+}
 }
 
 function trackById(id) {
@@ -405,9 +641,13 @@ async function executeJob(job, options, referenceAudio = null) {
       || options.duration;
 
     // letra escrita pelo proprio modelo (quando o usuario nao mandou uma)
-    const finalLyrics = options.instrumental
+    const rawLyrics = options.instrumental
       ? ''
       : (lyrics || result.meta?.lyrics || '');
+    // adiciona performance cues por defeito (Suno Engineer)
+    const finalLyrics = options.instrumental
+      ? ''
+      : addPerformanceCues(rawLyrics);
     // modo Natural Language: o ACE-Step expandiu o tema, mas nem sempre
     // devolve a letra escrita no `content` - avisamos em vez de deixar
     // a faixa silenciosa sobre o assunto.
@@ -594,7 +834,33 @@ export const handlers = {
       : (body.genre && GENRES[body.genre] ? body.genre : detectGenre(prompt));
     const genre = GENRES[genreKey];
     const moodKey = body.mood && MOODS[body.mood] ? body.mood : detectMood(prompt);
-    const effectiveStyle = styleFromText ? styleText : genre.label;
+
+    // Suporta mistura de ate 3 generos (pattern: [Primary] + [1-2 subgenre modifiers] + [1 key instrument])
+    // Segue Suno Engineer: generos especificos funcionam melhor, ate 3 termos
+    let genreMix = genreKey;
+    let genreMixLabels = genre.label;
+    if (!styleFromText && body.genreMix && Array.isArray(body.genreMix)) {
+      const selected = body.genreMix.filter((g) => GENRES[g]).slice(0, 3);
+      if (selected.length >= 2) {
+        genreMix = selected.join(', ');
+        genreMixLabels = selected.map((g) => GENRES[g] ? GENRES[g].label : g).join(', ');
+      }
+    }
+
+    // Monta o caption no estilo Suno Engineer ( [Vocal]. [Genre]. [Production] )
+    // Segue princípios: vocals FIRST, every descriptor adds distinct info, Variety Off
+    const sunoCaption = buildSunoCaption({
+      prompt: String(body.prompt || '').trim(),
+      style: styleFromText ? body.style : undefined,
+      styleFromText: styleFromText,
+      genreLabel: genre.label,
+      moodLabel: moodKey,
+      lofi: asBool(body.lofi),
+      instrumental: asBool(body.instrumental),
+      duration: Number(body.duration) || 75,
+    });
+
+    const effectiveStyle = styleFromText ? body.style : sunoCaption;
     const options = {
       prompt,
       title: body.title,
@@ -606,6 +872,8 @@ export const handlers = {
       style: effectiveStyle,
       // rotulo exibido no card da faixa (o texto digitado, quando existe)
       styleLabel: effectiveStyle,
+      // label do genero (ou mistura de generos)
+      genreLabel: genreMixLabels,
       styleSource: styleFromText ? 'text' : 'genre',
       styleFromText,
       // modo do audio anexado: referencia de estilo (remix) ou cover
