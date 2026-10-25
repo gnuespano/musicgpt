@@ -35,7 +35,7 @@ import {
 
 const SYSTEM_PROMPT = `Voce e um compositor e letrista profissional.
 
-const LOCAL_STYLE_EXPANSION_DICT = new Map([
+export const LOCAL_STYLE_EXPANSION_DICT = new Map([
   ['mpb', 'MPB melancolica com violao, pandeiro e saxofone ao fundo, ritmo moderado, voz sentimental'],
   ['trap', 'Trap pesado com 808 grave, hi-hats rapidos e sintetizadores escuros, BPM 140, voz arrastada'],
   ['pop', 'Pop dançante com sintetizadores brilhantes e refrao chiclete, BPM 128, voz clara e dominante'],
