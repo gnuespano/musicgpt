@@ -825,7 +825,6 @@ const STYLE_EXPANSION_USER_PROMPT = 'Gere uma descrição detalhada de estilo mu
  * Retorna a descrição expandida ou null em caso de erro.
  * O dicionário local serve apenas como fallback se a API falhar.
  */
- */
 async function callNvidiaForStyleExpansion(prompt) {
   log('pedindo expansão de estilo ao NVIDIA NIM');
   const controller = new AbortController();
