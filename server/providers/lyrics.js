@@ -825,102 +825,6 @@ const STYLE_EXPANSION_USER_PROMPT = 'Gere uma descrição detalhada de estilo mu
  * Retorna a descrição expandida ou null em caso de erro.
  * O dicionário local serve apenas como fallback se a API falhar.
  */
-export async function expandStyleWithAI(genre) {
-  const genreLower = String(genre || '').trim().toLowerCase();
-  if (!genreLower) {
-    log('[estilo-ia] gênero vazio, retornando null');
-    return null;
-  }
-
-  log(`[estilo-ia] expandStyleWithAI chamado para gênero="${genreLower}"`);
-
-  // Usa exclusivamente a NVIDIA Nemotron 3.5 Lightning
-  if (nvidiaAvailable()) {
-    try {
-      log('[estilo-ia] NVIDIA disponível, chamando API para expansão de estilo');
-      const prompt = STYLE_EXPANSION_USER_PROMPT.replace('{gênero}', genreLower);
-      log(`[estilo-ia] prompt enviado à NVIDIA: "${prompt.slice(0, 120)}"`);
-      const result = await callNvidiaForStyleExpansionWithNemotron(prompt);
-      log(`[estilo-ia] NVIDIA retornou com SUCESSO: "${result.slice(0, 100)}"`);
-      return result;
-    } catch (err) {
-      log(`[estilo-ia] NVIDIA FALHOU: ${primeiraLinha(err.message)} -> usando dicionário local`);
-    }
-  } else {
-    log('[estilo-ia] NVIDIA_API_KEY não configurada, usando dicionário local');
-  }
-
-  // Fallback: dicionário local
-  const local = LOCAL_STYLE_EXPANSION_DICT.get(genreLower);
-  if (local) {
-    log(`[estilo-ia] usando dicionário local para gênero="${genreLower}": "${local.slice(0, 80)}"`);
-    return local;
-  }
-
-  log(`[estilo-ia] gênero="${genreLower}" não encontrado no dicionário local`);
-  return null;
-
-/**
- * Chama a NVIDIA Nemotron 3.5 para expansão de estilo.
- * Usa a chave nvapi-... e o modelo nvidia/nemotron-3-120b-a12b.
- */
-async function callNvidiaForStyleExpansionWithNemotron(prompt) {
-  // Modelo específico Nemotron 3.5 Lightning (validação: retorna 200 com conteúdo real;
-  // nvidia/nemotron-3-120b-a12b retorna 404 - não existe neste endpoint)
-  const model = 'nvidia/nemotron-3.5-lightning-30b-a3b';
-  
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 15000);
-  let res;
-  try {
-    res = await fetch('https://integrate.api.nvidia.com/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: 'Bearer ' + NVIDIA.apiKey,
-      },
-      body: JSON.stringify({
-        model: model,
-        messages: [
-          { role: 'system', content: STYLE_EXPANSION_SYSTEM_PROMPT },
-          { role: 'user', content: prompt },
-        ],
-        temperature: 1.1,
-        max_tokens: 4096,
-        chat_template_kwargs: { enable_thinking: false },
-      }),
-      signal: controller.signal,
-    });
-  } finally {
-    clearTimeout(timer);
-  }
-
-  const raw = await res.text();
-  let payload = null;
-  try { payload = JSON.parse(raw); } catch { /* tratado abaixo */ }
-  if (!res.ok) {
-    const motivo = payload?.error?.message || payload?.message || raw.slice(0, 200);
-    throw new Error('NVIDIA respondeu ' + res.status + ': ' + motivo);
-  }
-
-  const msg = payload?.choices?.[0]?.message || {};
-  const content = String(msg.content || '').trim();
-  if (!content) {
-    const raciocinio = String(msg.reasoning_content || '').trim();
-    if (raciocinio) {
-      throw new Error('NVIDIA só devolveu raciocínio, sem conteúdo');
-    }
-    throw new Error('NVIDIA não retornou conteúdo');
-  }
-
-  const clean = content.replace(/^["'`]+|["'`]+$/g, '').replace(/\.+$/, '').trim();
-  log('NVIDIA Nemotron devolveu estilo expandido: "' + content.slice(0, 80) + '"');
-  return clean;
-}
-}
-
-/**
- * Chama NVIDIA NIM para expansão de estilo.
  */
 async function callNvidiaForStyleExpansion(prompt) {
   log('pedindo expansão de estilo ao NVIDIA NIM');
@@ -1147,4 +1051,93 @@ export function buildSunoCaption({ prompt, style, styleFromText = false, genreLa
   return nonEmptyBits[0] || 'instrumental track';
 }
 
+// Dicionário de progressões harmônicas por estilo
+const harmonicProgressions = {
+  'Sertanejo': [
+    'G - D - Em - C (I - V - vi - IV)',
+    'C - G - Am - F',
+    'D - A - Bm - G'
+  ],
+  'MPB': [
+    'Am7 - Dm7 - G7 - Cmaj7',
+    'Dm7 - G7 - Cmaj7 - Am7',
+    'Fmaj7 - Em7 - Dm7 - Cmaj7'
+  ],
+  'Pop': [
+    'C - G - Am - F',
+    'Am - F - C - G',
+    'Em - C - G - D'
+  ],
+  'Rock': [
+    'E5 - A5 - B5 - G5',
+    'A5 - D5 - E5 - G5',
+    'Em - C - G - D'
+  ],
+  'Trap': [
+    'Cm - Ab - Eb - Bb',
+    'Fm - Db - Ab - Eb',
+    'Gm - Cm - Eb - Bb'
+  ],
+  'Funk': [
+    'Am - Dm - E - Am',
+    'Dm - G - C - Bb',
+    'Am - E - F - C'
+  ],
+  'Lo-fi': [
+    'Am - F - C - G',
+    'Dm - G - C - Bb',
+    'Em - Am - C - G'
+  ]
+};
+
 // Remove: export const LYRIC_THEMES = [...Object.keys(THEMES), 'livre', 'en'];
+
+
+
+export async function expandStyleWithAI(genre) {
+  const genreLower = String(genre || "").trim().toLowerCase();
+  if (!genreLower) {
+    log("[estilo-ia] genero vazio, retornando null");
+    return null;
+  }
+
+  // 1. Sorteia uma progressao harmonica baseada no estilo
+  const progressionsForStyle = harmonicProgressions[genreLower] || harmonicProgressions["Pop"];
+  const randomProgression = progressionsForStyle[Math.floor(Math.random() * progressionsForStyle.length)];
+
+  log("[estilo-ia] expandStyleWithAI chamado para genero=" + genreLower);
+  log("[estilo-ia] progressao harmonica sorteada: " + randomProgression);
+
+  // 2. Monta o prompt para o LLM com a progressao harmonica inclusa
+  const llmPrompt = " voce e um especialista em estilos musicais Suno AI. Expanda o estilo musical " + genreLower + " no formato da Suno AI. OBRIGATORIO: Inclua explicitamente esta progressao harmonica na sua descricao: " + randomProgression + ". Seja descritivo com instrumentos, clima, BPM e tipo de vocal. Responda APENAS com a descricao, sem aspas, sem introducao, sem explicacoes.";
+
+  // Usa exclusivamente a NVIDIA Nemotron 3.5 Lightning
+  if (nvidiaAvailable()) {
+    try {
+      log("[estilo-ia] NVIDIA disponivel, chamando API para expandicao de estilo");
+      const prompt = STYLE_EXPANSION_USER_PROMPT.replace("{gênero}", genreLower);
+      log("[estilo-ia] prompt enviado NVIDIA: " + prompt.slice(0, 120));
+      const result = await callNvidiaForStyleExpansionWithNemotron(llmPrompt);
+      log("[estilo-ia] NVIDIA retornou com SUCESSO: " + result.slice(0, 100));
+      if (result && !result.includes(randomProgression)) {
+        return result + " . Progressao harmonica: " + randomProgression;
+      }
+      return result;
+    } catch (err) {
+      log("[estilo-ia] NVIDIA FALHOU: " + primeiraLinha(err.message) + " -> usando dicionario local com progressao");
+    }
+  } else {
+    log("[estilo-ia] NVIDIA_API_KEY nao configurada, usando dicionario local com progressao");
+  }
+
+  // Fallback: dicionario local + progressao sorteada
+  const local = LOCAL_STYLE_EXPANSION_DICT.get(genreLower);
+  if (local) {
+    log("[estilo-ia] usando dicionario local para genero=" + genreLower + ": " + local.slice(0, 80));
+    return local + ", com progressao harmonica: " + randomProgression;
+  }
+
+  // Fallback final: gera descricao basica com a progressao sorteada
+  return "Estilo " + genreLower + " com progressao harmonica: " + randomProgression;
+}
+
