@@ -15,7 +15,17 @@ import {
   mainLyricsProvider,
   PROVIDERS,
 } from './config.js';
-import { generateLyricsWithProvider, generateMusicStyle, expandStyleWithAI, buildSunoCaption, LOCAL_STYLE_EXPANSION_DICT } from './providers/lyrics.js';
+import {
+  generateLyricsWithProvider,
+  generateMusicStyle,
+  expandStyleWithAI,
+  buildSunoCaption,
+  LOCAL_STYLE_EXPANSION_DICT,
+  // camada determinística de performance cues + quebra por sílabas
+  applyLyricsPipeline,
+  addPerformanceCues,
+  breakLyricsIntoSyllableLines,
+} from './providers/lyrics.js';
 import { generateMusic } from './providers/music.js';
 import { aceStepStatus, normalizeAudioMode } from './providers/acestep.js';
 import { generateLyrics as generateLocalLyrics, lyricTheme } from './lyrics.js';
@@ -39,6 +49,25 @@ const workerFile = new URL('./audio/worker.js', import.meta.url);
 /* ------------------------------------------------------------------ *
  * Helpers
  * ------------------------------------------------------------------ */
+
+/**
+ * Contexto das performance cues (a letra NUNCA leva instrumento/clima/vocal:
+ * isso fica no prompt de estilo do ACE-Step).
+ * includeDirections = false por padrão -> nenhuma linha entre parênteses.
+ */
+function buildCueContext(source = {}, provider = '') {
+  const opts = source && typeof source === 'object' ? source : {};
+  return {
+    genre: opts.genreLabel || opts.genre || '',
+    style: opts.style || opts.styleLabel || '',
+    mood: opts.moodLabel || opts.mood || '',
+    vocals: opts.voiceStyle || opts.vocals || '',
+    energy: opts.energy || '',
+    provider: provider || opts.provider || '',
+    includeDirections: opts.includeDirections === true,
+    bridge: opts.bridge === true || opts.hasBridge === true,
+  };
+}
 
 export function json(res, status, body) {
   const payload = JSON.stringify(body);
@@ -116,6 +145,7 @@ function isShortStyle(style) {
   if (trimmed.includes(' ')) return false;
   // Must be in the known genre words set
   return GENRE_WORDS.has(trimmed.toLowerCase());
+}
 /**
  * Blocklist de nomes de artistas - NUNCA use nomes reais em prompts Suno.
  * A API do Suno rewroteia eles e o plugin bloqueia antes disso.
@@ -151,118 +181,6 @@ function getGenreMixLabels(genreKey, styleFromText, bodyGenreMix) {
     }
   }
   return { genreMix, genreMixLabels };
-}
-
-/**
- * Adiciona Performance Cues às seções da letra.
- * Suno Engineer: append a brief delivery-cue phrase (a word or two) directly
- * to each structure tag ([Verse 1 - cold regal], [Bridge - raw breaking]).
- * Default, not optional - faz isso para toda faixa.
- * Máximo 3 bracketed descriptors por seção (cues + accent <= 3).
- */
-function addPerformanceCues(lyricsText) {
-  if (!lyricsText) return lyricsText;
-
-  const SECTION_TAG_RE = /^\s*\[[^\]]{1,40}\]\s*$/;
-  const lines = lyricsText.split('\n');
-  const result = [];
-  let currentSection = null;
-  let cuesInSection = 0;
-
-  for (const line of lines) {
-    const trimmed = line.trim();
-
-    if (SECTION_TAG_RE.test(trimmed)) {
-      if (currentSection) {
-        const mainCue = currentSection.cues.length > 0 ? currentSection.cues[0] : '';
-        const tagWithCue = `${currentSection.tagName} ${mainCue}`.trim();
-        result.push(tagWithCue);
-      } else {
-        result.push(trimmed);
-      }
-      currentSection = { tagName: trimmed, cues: [] };
-      cuesInSection = 0;
-      continue;
-    }
-
-    if (currentSection) {
-      const cueMatch = trimmed.match(/^\s*\[([^\]]+)\]\s*(.*)$/);
-      if (cueMatch) {
-        const cueText = cueMatch[1].trim();
-        const rest = cueMatch[2].trim();
-        if (cueText && cuesInSection < 3) {
-          currentSection.cues.push(cueText);
-          cuesInSection++;
-          currentSection.lines.push(rest || cueText);
-        } else if (cueText) {
-          currentSection.lines.push(trimmed);
-        } else {
-          currentSection.lines.push(trimmed);
-        }
-        continue;
-      }
-
-      const innerCueMatch = trimmed.match(/\[([^\]]+)\]/);
-      if (innerCueMatch && currentSection.cues.length < 3 - cuesInSection) {
-        const cueText = innerCueMatch[1].trim();
-        if (cueText) {
-          currentSection.cues.push(cueText);
-          cuesInSection++;
-          const cleaned = trimmed.replace(/\[[^\]]+\]/, '').trim();
-          currentSection.lines.push(cleaned);
-          continue;
-        }
-      }
-
-      currentSection.lines.push(trimmed);
-    } else {
-      result.push(trimmed);
-    }
-  }
-
-  if (currentSection) {
-    const mainCue = currentSection.cues.length > 0 ? currentSection.cues[0] : '';
-    const tagWithCue = `${currentSection.tagName} ${mainCue}`.trim();
-    result.push(tagWithCue);
-  }
-
-  const sectionTagRe = /^(\s*)(\[[^\]]+\])(\s*)$/;
-  const formattedLines = [];
-  let currentSectionTag = null;
-  let sectionCueCount = 0;
-
-  for (const line of result) {
-    const tagMatch = line.match(sectionTagRe);
-    if (tagMatch) {
-      if (currentSectionTag) {
-        if (sectionCueCount < 3) {
-          const lastLine = formattedLines[formattedLines.length - 1];
-          if (lastLine && !lastLine.includes('[')) {
-            formattedLines[formattedLines.length - 1] = lastLine + ` [${currentSectionTag}]`;
-            sectionCueCount++;
-          }
-        }
-      }
-      currentSectionTag = tagMatch[2];
-      sectionCueCount = 0;
-      formattedLines.push(line);
-    } else {
-      formattedLines.push(line);
-    }
-  }
-
-  if (currentSectionTag && sectionCueCount < 3) {
-    const lastIdx = formattedLines.length - 1;
-    if (lastIdx >= 0) {
-      const lastLine = formattedLines[lastIdx];
-      if (!lastLine.includes(currentSectionTag.replace('[', ']').replace(']', ''))) {
-        formattedLines[lastIdx] = lastLine + ` [${currentSectionTag}]`;
-      }
-    }
-  }
-
-  return formattedLines.join('\n');
-}
 }
 
 function trackById(id) {
@@ -444,6 +362,14 @@ async function executeJob(job, options, referenceAudio = null) {
       }
     }
 
+    // PERFORMANCE CUES: a quebra por sílabas (6-9) roda ANTES das cues e as
+    // tags ficam canônicas, sem número ([Verse], [Chorus], [Bridge], [Outro]).
+    // Nada entre parênteses: instrumento, clima e vocal vão no prompt de
+    // estilo. O refrão repetido continua idêntico depois da quebra.
+    if (lyrics && !options.instrumental) {
+      lyrics = applyLyricsPipeline(lyrics, buildCueContext(options, lyricsEngine));
+    }
+
     emit({ status: 'running', stage: 'composicao', progress: 12, detail: 'escrevendo a música' });
 
     const voiceProvider = activeVoiceProvider();
@@ -579,7 +505,7 @@ async function executeJob(job, options, referenceAudio = null) {
       mood: options.mood,
       moodLabel: options.moodLabel,
       // estilo usado na geracao (texto digitado > botao de genero)
-      style: options.style,
+      style: options.styleLabel || options.style,
       styleLabel: options.styleLabel,
       styleSource: options.styleSource,
       instrumental: Boolean(options.instrumental),
@@ -636,7 +562,25 @@ async function executeJob(job, options, referenceAudio = null) {
     lib.tracks.unshift(track);
     store.saveLibrary(lib);
 
-    emit({ status: 'done', progress: 100, stage: 'pronto', track: publicTrack(track) });
+    
+
+    // --- Versões ---
+    // O app anuncia 4 seeds alternativas; o audio gerado acima e a
+    // PRIMEIRA versão (gerar 4 audios custa 4x a cota do ACE-Step).
+    // Antes este bloco chamava executeJob() sem await -> recursao
+    // infinita (um pedido ao ACE-Step por nivel) e o job nunca fechava.
+    const seeds = [];
+    for (let i = 0; i < 4; i += 1) {
+      const versionSeed = options.seed !== undefined ? options.seed + i : undefined;
+      seeds.push(versionSeed);
+      emit({ status: 'info', stage: 'seed', detail: `Versão ${i + 1}: seed=${versionSeed}` });
+    }
+    job.seeds = seeds;
+
+    // fecha o job com a faixa pronta (o SSE manda job.track no payload)
+    job.track = track;
+    emit({ status: 'done', progress: 100, stage: 'pronto', detail: null, error: null });
+
   } catch (error) {
     emit({ status: 'error', stage: 'erro', progress: 100, error: error?.message || String(error) });
   }
@@ -744,6 +688,7 @@ export const handlers = {
       ? detectGenre(prompt)
       : (body.genre && GENRES[body.genre] ? body.genre : detectGenre(prompt));
     const genre = GENRES[genreKey];
+    // Verifica se estilo &x27e Sertanejo, sofrncia ou moda para forcar BPM''''''''''''''
     const moodKey = body.mood && MOODS[body.mood] ? body.mood : detectMood(prompt);
 
     // Suporta mistura de ate 3 generos (pattern: [Primary] + [1-2 subgenre modifiers] + [1 key instrument])
@@ -771,7 +716,18 @@ export const handlers = {
       duration: Number(body.duration) || 75,
     });
 
-    const effectiveStyle = styleFromText ? body.style : sunoCaption;
+    /**
+     * Estilo que vai para o motor.
+     *
+     * No modo GENERO (o usuario nao digitou estilo) o motor recebe SO a
+     * expansao do genero. Antes recebia o caption inteiro e o motor
+     * acrescentava o prompt de novo, duplicando o texto no payload do
+     * ACE-Step ("batida X, batida X. MPB ...").
+     */
+    const genreExpandido = STYLE_EXPANSION_DICT.get(String(genreKey || '').toLowerCase().trim()) || '';
+    const effectiveStyle = styleFromText
+      ? body.style
+      : (genreExpandido || genre.label || sunoCaption);
     const options = {
       prompt,
       title: body.title,
@@ -782,7 +738,7 @@ export const handlers = {
       // estilo que vai para o motor de musica (caption do ACE-Step)
       style: effectiveStyle,
       // rotulo exibido no card da faixa (o texto digitado, quando existe)
-      styleLabel: effectiveStyle,
+      styleLabel: styleFromText ? body.style : (genre.label || effectiveStyle),
       // label do genero (ou mistura de generos)
       genreLabel: genreMixLabels,
       styleSource: styleFromText ? 'text' : 'genre',
@@ -842,8 +798,8 @@ export const handlers = {
           options.styleSource = 'local-fallback';
         }
       }
-    }
-    jobs.set(job.id, job);
+      }  // Fecha bloco de expansão de estilo
+      jobs.set(job.id, job);
     setTimeout(() => executeJob(job, options, referenceAudio), 10);
     return json(res, 202, { jobId: job.id, status: job.status });
   },
@@ -917,6 +873,15 @@ export const handlers = {
 
     try {
       const result = await generateLyricsWithProvider(opts);
+      // mesma pipeline da geração: sílabas -> cues canônicas, sem parênteses
+      if (opts.mode !== 'next' && result && typeof result.text === 'string' && result.text.trim()) {
+        result.text = applyLyricsPipeline(result.text, buildCueContext({
+          ...opts,
+          genre: body.genre,
+          mood: body.mood,
+          vocals: body.vocals,
+        }, result.engine));
+      }
       // provider = rotulo amigavel para o front (o engine local e 'local-templates')
       const provider = result.engine === 'local-templates' ? 'local' : result.engine;
       if (opts.mode === 'next') {

@@ -106,13 +106,20 @@ export function normalizeAudioMode(mode) {
  * botao nao e acrescentado, para nao aparecer "Pop style" junto do texto
  * que o usuario escreveu.
  */
-export function buildCaption({ prompt, style, styleFromText = false, genreLabel, moodLabel, lofi, instrumental, duration }) {
+export function buildCaption({ prompt, style, styleFromText = false, genreLabel, moodLabel, lofi, instrumental, duration, keyLabel }) {
   const bits = [];
   const text = String(prompt || '').trim();
   if (text) bits.push(text);
 
   const genre = styleFromText ? '' : (style || genreLabel);
-  if (genre) bits.push(`${genre} style`);
+  const keyBit = keyLabel ? `key of ${keyLabel}` : "";
+  if (keyBit) bits.push(keyBit);
+  // "Pop" vira "Pop style"; uma frase ja pronta ("MPB melancolica com
+  // violao, pandeiro...") entra como esta, sem um " style" no fim.
+  if (genre) {
+    const rotuloCurto = genre.length <= 24 && !/\s/.test(genre);
+    bits.push(rotuloCurto ? `${genre} style` : genre);
+  }
 
   const mood = moodLabel;
   if (mood) bits.push(`${mood} mood`);
@@ -235,6 +242,7 @@ export function buildRequestBody({ prompt, lyrics, style, styleFromText = false,
     use_cot_caption: true,
     use_cot_language: true,
     audio_config: audioConfig,
+    num_inference_steps: 60,
   };
 
   // sem letra do usuario: o proprio LM escreve a letra (sample mode).
