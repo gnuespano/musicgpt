@@ -503,7 +503,7 @@ const ARTIST_BLOCKLIST = new Map([
   ['billie eilish', 'dark pop, breathy vocals, intimate production, synth'],
 ]);
 
-function expandStyleLocal(style) {
+export function expandStyleLocal(style) {
   if (!style) return null;
   const trimmed = style.trim().toLowerCase();
   const local = STYLE_EXPANSION_DICT.get(trimmed);
