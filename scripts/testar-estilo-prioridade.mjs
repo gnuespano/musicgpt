@@ -42,6 +42,26 @@ const { check } = report;
 /** Texto de estilo usado no teste (o que o usuario digita). */
 const ESTILO = 'Modern talking, cherry cherry lady';
 
+
+/* ------------------------------------------------------------------ *
+ * Contrato de formatacao (patch de performance cues)
+ * ------------------------------------------------------------------ */
+
+/** Compara o CONTEUDO da letra, ignorando tags e quebras de linha. */
+function mesmaLetra(a, b) {
+  const palavras = (t) => String(t ?? '')
+    .replace(/\[[^\]]*\]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return palavras(a) === palavras(b) && palavras(a).length > 0;
+}
+
+/** Tags canonicas SEM numero: [Verse], [Chorus], [Bridge], [Outro]. */
+function tagsCanonicas(t) {
+  const texto = String(t ?? '');
+  return /\[(Verse|Chorus|Bridge|Outro)\]/i.test(texto)
+    && !/\[(Verse|Chorus|Bridge|Outro)\s*\d+\]/i.test(texto);
+}
 /* ------------------------------------------------------------------ *
  * Helpers
  * ------------------------------------------------------------------ */
@@ -274,7 +294,21 @@ try {
     campo.dispatchEvent(new Event('input', { bubbles: true }));
     return true;
   })`);
-  await delay(300);
+  // A opacidade dos chips tem uma transicao CSS de 140 ms. Uma espera
+  // fixa pode ler o valor no MEIO da animacao (ou antes do primeiro
+  // frame renderizado), dando falso negativo. Aqui esperamos a transicao
+  // assentar (ou 40 frames) e so entao medimos.
+  await browser.cdp.eval(`(() => new Promise((resolve) => {
+    const chip = document.querySelector('#genreChips .chip');
+    let tries = 0;
+    const tick = () => {
+      tries += 1;
+      if (Number(getComputedStyle(chip).opacity) < 0.6 || tries > 40) resolve(true);
+      else requestAnimationFrame(tick);
+    };
+    tick();
+  }))`);
+  await delay(120);
 
   const visual = await browser.cdp.eval(`(() => {
     const chips = document.querySelector('#genreChips');

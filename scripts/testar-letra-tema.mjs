@@ -53,6 +53,26 @@ const LETRA_ESCRITA = [
 ].join('\n');
 
 /* ------------------------------------------------------------------ *
+ * Contrato de formatacao (patch de performance cues)
+ * ------------------------------------------------------------------ */
+
+/** Compara o CONTEUDO da letra, ignorando tags e quebras de linha. */
+function mesmaLetra(a, b) {
+  const palavras = (t) => String(t ?? '')
+    .replace(/\[[^\]]*\]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return palavras(a) === palavras(b) && palavras(a).length > 0;
+}
+
+/** Tags canonicas SEM numero: [Verse], [Chorus], [Bridge], [Outro]. */
+function tagsCanonicas(t) {
+  const texto = String(t ?? '');
+  return /\[(Verse|Chorus|Bridge|Outro)\]/i.test(texto)
+    && !/\[(Verse|Chorus|Bridge|Outro)\s*\d+\]/i.test(texto);
+}
+
+/* ------------------------------------------------------------------ *
  * Helpers
  * ------------------------------------------------------------------ */
 
@@ -206,8 +226,9 @@ try {
 
   // letra ja escrita pelo usuario: e respeitada como esta (nao reescrita)
   const letraDoUsuario = await gerar(server.url, { prompt: TEMA, lyrics: LETRA_ESCRITA });
-  check('http: uma letra completa escrita pelo usuario e respeitada',
-    letraDoUsuario.lyrics.trim() === LETRA_ESCRITA.trim() && letraDoUsuario.lyricsExpanded === false,
+  check('http: uma letra completa escrita pelo usuario e respeitada (conteudo intacto, formatado pelo pipeline)',
+    mesmaLetra(letraDoUsuario.lyrics, LETRA_ESCRITA) && tagsCanonicas(letraDoUsuario.lyrics)
+    && letraDoUsuario.lyricsExpanded === false,
     JSON.stringify(letraDoUsuario.lyrics.slice(0, 60)));
 
   // instrumental: tema no campo nao gera vocal nem letra

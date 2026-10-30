@@ -75,6 +75,26 @@ const LETRA_DO_LM = [
   'E seguir com as maos vazias na estrada',
 ].join('\n');
 
+
+/* ------------------------------------------------------------------ *
+ * Contrato de formatacao (patch de performance cues)
+ * ------------------------------------------------------------------ */
+
+/** Compara o CONTEUDO da letra, ignorando tags e quebras de linha. */
+function mesmaLetra(a, b) {
+  const palavras = (t) => String(t ?? '')
+    .replace(/\[[^\]]*\]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return palavras(a) === palavras(b) && palavras(a).length > 0;
+}
+
+/** Tags canonicas SEM numero: [Verse], [Chorus], [Bridge], [Outro]. */
+function tagsCanonicas(t) {
+  const texto = String(t ?? '');
+  return /\[(Verse|Chorus|Bridge|Outro)\]/i.test(texto)
+    && !/\[(Verse|Chorus|Bridge|Outro)\s*\d+\]/i.test(texto);
+}
 /* ------------------------------------------------------------------ *
  * Helpers
  * ------------------------------------------------------------------ */
@@ -309,14 +329,17 @@ try {
   // 2b. letra completa escrita pelo usuario -> respeitada (vai em <lyrics>)
   const comLetra = await gerar(server.url, { prompt: 'MPB melancólica com violão', lyrics: LETRA_ESCRITA });
   const pedidoLetraHttp = stub.last();
+  const blocoLyrics = String(pedidoLetraHttp.messages[0].content)
+    .match(/<lyrics>([\s\S]*?)<\/lyrics>/)?.[1] || '';
   check('http: letra completa -> o pedido leva <lyrics> com o texto do usuario',
-    String(pedidoLetraHttp.messages[0].content).includes(`<lyrics>${LETRA_ESCRITA}</lyrics>`),
+    mesmaLetra(blocoLyrics, LETRA_ESCRITA) && tagsCanonicas(blocoLyrics),
     JSON.stringify(String(pedidoLetraHttp.messages[0].content).slice(-80)));
   check('http: letra completa -> sem sample_mode (o LM nao reescreve)',
     pedidoLetraHttp.sample_mode === undefined && pedidoLetraHttp.sample_query === undefined,
     JSON.stringify({ sample_mode: pedidoLetraHttp.sample_mode, sample_query: pedidoLetraHttp.sample_query }));
-  check('http: a faixa guarda a letra do usuario intacta',
-    comLetra.lyrics.trim() === LETRA_ESCRITA.trim() && comLetra.lyricsExpanded === false,
+  check('http: a faixa guarda a letra do usuario intacta (conteudo intacto, formatado pelo pipeline)',
+    mesmaLetra(comLetra.lyrics, LETRA_ESCRITA) && tagsCanonicas(comLetra.lyrics)
+    && comLetra.lyricsExpanded === false,
     JSON.stringify(comLetra.lyrics.slice(0, 60)));
 
   // 2c. instrumental -> tema nao vira sample_query

@@ -68,6 +68,26 @@ const LETRA_NVIDIA = [
 ].join('\n');
 
 /* ------------------------------------------------------------------ *
+ * Contrato de formatacao (patch de performance cues)
+ * ------------------------------------------------------------------ */
+
+/** Compara o CONTEUDO da letra, ignorando tags e quebras de linha. */
+function mesmaLetra(a, b) {
+  const palavras = (t) => String(t ?? '')
+    .replace(/\[[^\]]*\]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return palavras(a) === palavras(b) && palavras(a).length > 0;
+}
+
+/** Tags canonicas SEM numero: [Verse], [Chorus], [Bridge], [Outro]. */
+function tagsCanonicas(t) {
+  const texto = String(t ?? '');
+  return /\[(Verse|Chorus|Bridge|Outro)\]/i.test(texto)
+    && !/\[(Verse|Chorus|Bridge|Outro)\s*\d+\]/i.test(texto);
+}
+
+/* ------------------------------------------------------------------ *
  * Helpers
  * ------------------------------------------------------------------ */
 
@@ -216,7 +236,8 @@ try {
   const letra = await pedirLetra(server.url, { prompt: TEMA, lang: 'pt' });
   const pedido = stub.last();
   check('http: /api/lyrics devolve a letra extraida do JSON do DeepSeek',
-    letra.text === LETRA_DEEPSEEK && letra.engine === 'deepseek'
+    mesmaLetra(letra.text, LETRA_DEEPSEEK) && tagsCanonicas(letra.text)
+    && letra.engine === 'deepseek'
     && letra.provider === 'deepseek',
     JSON.stringify({ engine: letra.engine, provider: letra.provider, texto: String(letra.text).slice(0, 40) }));
   check('http: o pedido usa o modelo deepseek-chat',
@@ -225,9 +246,10 @@ try {
     pedido.response_format?.type === 'json_object',
     JSON.stringify(pedido.response_format));
   const system = String(pedido.messages?.[0]?.content || '');
-  check('http: o system prompt pede compositor brasileiro + [Verso]/[Refrao] em pt-BR',
+  check('http: o system prompt pede compositor brasileiro + [Verse]/[Chorus] sem numero em pt-BR',
     /compositor/i.test(system) && /portugues do Brasil/i.test(system)
-    && system.includes('[Verso') && system.includes('[Refrao'),
+    && system.includes('[Verse]') && system.includes('[Chorus]')
+    && !/\[(?:Verse|Chorus|Bridge|Outro)\s*\d+\]/i.test(system),
     JSON.stringify(system.slice(0, 80)));
   check('http: o system prompt pede saida em JSON (exigencia do JSON mode)',
     /json/i.test(system), JSON.stringify(system.slice(-60)));
@@ -238,7 +260,8 @@ try {
   // 1b. geracao principal: tema do campo "Letra" -> letra do DeepSeek
   const faixa = await gerar(server.url, { prompt: 'MPB melancólica com violão', lyrics: TEMA });
   check('http: na geracao, o tema vira letra do DeepSeek (engine deepseek)',
-    faixa.lyrics.trim() === LETRA_DEEPSEEK && faixa.lyricsEngine === 'deepseek',
+    mesmaLetra(faixa.lyrics, LETRA_DEEPSEEK) && tagsCanonicas(faixa.lyrics)
+    && faixa.lyricsEngine === 'deepseek',
     JSON.stringify({ engine: faixa.lyricsEngine, lyrics: faixa.lyrics.slice(0, 40) }));
   check('http: a faixa guarda o tema original como expandido',
     faixa.lyricsTheme === TEMA && faixa.lyricsExpanded === true,
@@ -260,7 +283,8 @@ try {
   const antesUser = stub.pedidos.length;
   const faixaUser = await gerar(server.url, { prompt: 'MPB melancólica com violão', lyrics: LETRA_ESCRITA });
   check('http: letra completa do usuario NAO passa pelo DeepSeek (respeitada, sem chamada)',
-    faixaUser.lyrics.trim() === LETRA_ESCRITA
+    mesmaLetra(faixaUser.lyrics, LETRA_ESCRITA) && tagsCanonicas(faixaUser.lyrics)
+    && faixaUser.lyricsExpanded === false
     && stub.pedidos.length === antesUser,
     JSON.stringify({ lyrics: faixaUser.lyrics.slice(0, 40), chamadas_ao_stub: stub.pedidos.length - antesUser }));
 
@@ -313,14 +337,16 @@ try {
   const antesNvidia = stubNvidia.pedidos.length;
   const letraOk = await pedirLetra(cadeia.url, { prompt: TEMA, lang: 'pt' });
   check('cadeia: DeepSeek responde -> letra do DeepSeek, NVIDIA NIM nao e chamado',
-    letraOk.text === LETRA_DEEPSEEK && letraOk.engine === 'deepseek'
+    mesmaLetra(letraOk.text, LETRA_DEEPSEEK) && tagsCanonicas(letraOk.text)
+    && letraOk.engine === 'deepseek'
     && stubNvidia.pedidos.length === antesNvidia,
     JSON.stringify({ engine: letraOk.engine, chamadas_nvidia: stubNvidia.pedidos.length - antesNvidia }));
 
   // 2b. DeepSeek 500 -> NVIDIA NIM assume (engine nvidia, letra do NIM)
   const letraNvidia = await pedirLetra(cadeia.url, { prompt: `FALHAR ${TEMA}`, lang: 'pt' });
   check('cadeia: DeepSeek 500 -> NVIDIA NIM assume (engine nvidia, provider nvidia)',
-    letraNvidia.text === LETRA_NVIDIA && letraNvidia.engine === 'nvidia'
+    mesmaLetra(letraNvidia.text, LETRA_NVIDIA) && tagsCanonicas(letraNvidia.text)
+    && letraNvidia.engine === 'nvidia'
     && letraNvidia.provider === 'nvidia' && !letraNvidia.fallback,
     JSON.stringify({ engine: letraNvidia.engine, provider: letraNvidia.provider, texto: String(letraNvidia.text).slice(0, 40) }));
   const pedidoNvidia = stubNvidia.last();
@@ -328,9 +354,11 @@ try {
     pedidoNvidia.model === 'openai/gpt-oss-20b',
     String(pedidoNvidia.model));
   const systemNvidia = String(pedidoNvidia.messages?.[0]?.content || '');
-  check('cadeia: o NIM recebe o MESMO system prompt do DeepSeek (compositor brasileiro + [Verso]/[Refrao])',
+  check('cadeia: o NIM recebe o MESMO system prompt do DeepSeek (compositor brasileiro + [Verse]/[Chorus])',
     systemNvidia === String(stubDeepSeekCadeia.last()?.messages?.[0]?.content || '')
-    && /compositor/i.test(systemNvidia) && systemNvidia.includes('[Verso') && systemNvidia.includes('[Refrao'),
+    && /compositor/i.test(systemNvidia) && systemNvidia.includes('[Verse]')
+    && systemNvidia.includes('[Chorus]')
+    && !/\[(?:Verse|Chorus|Bridge|Outro)\s*\d+\]/i.test(systemNvidia),
     JSON.stringify(systemNvidia.slice(0, 60)));
   check('cadeia: a chamada ao NIM autentica com Bearer da NVIDIA_API_KEY',
     /bearer\s+nvapi-stub/i.test(String(stubNvidia.lastHeaders()?.authorization || '')),
@@ -361,7 +389,8 @@ try {
       JSON.stringify({ lyrics: healthNvidia.lyricsProvider, main: healthNvidia.mainLyricsProvider }));
     const letraSoNvidia = await pedirLetra(soNvidia.url, { prompt: TEMA, lang: 'pt' });
     check('cadeia: /api/lyrics devolve a letra do NIM (engine nvidia)',
-      letraSoNvidia.text === LETRA_NVIDIA && letraSoNvidia.engine === 'nvidia',
+      mesmaLetra(letraSoNvidia.text, LETRA_NVIDIA) && tagsCanonicas(letraSoNvidia.text)
+      && letraSoNvidia.engine === 'nvidia',
       JSON.stringify({ engine: letraSoNvidia.engine, texto: String(letraSoNvidia.text).slice(0, 40) }));
   } finally {
     soNvidia.child.kill('SIGKILL');
@@ -388,8 +417,9 @@ if (LIVE) {
   check('live: a letra veio de um provedor de IA (nao do fallback local)',
     ['deepseek', 'nvidia'].includes(resultado.engine) && resultado.text !== undefined,
     String(resultado.engine + (resultado.fallback ? ` | ${resultado.fallback}` : '')));
-  check('live: a letra tem estrutura de [Verso]/[Refrao]',
-    /\[.*[Vv]erso/.test(resultado.text) && /\[.*[Rr]efr/.test(resultado.text),
+  check('live: a letra tem estrutura de [Verse]/[Chorus] sem numero',
+    /\[Verse\]/i.test(resultado.text) && /\[Chorus\]/i.test(resultado.text)
+    && !/\[(?:Verse|Chorus|Bridge|Outro)\s*\d+\]/i.test(resultado.text),
     JSON.stringify(resultado.text.slice(0, 60)));
 } else {
   console.log('(camada live pulada - rode com MUSICGPT_TESTE_LIVE=1 para chamar a DeepSeek de verdade)');
