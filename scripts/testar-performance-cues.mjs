@@ -395,3 +395,30 @@ O silêncio cobre tudo outra vez`;
   assert.ok(!/\([^)]*\)/.test(out), 'a letra não pode conter parênteses');
   assert.ok(!/\[[A-Za-z]+\s*\d+\]/.test(out), 'a letra não pode ter tag numerada');
 });
+
+test('REGRESSÃO — seção sem texto (só tag + direção) não vira bloco vazio', () => {
+  // O LLM às vezes escreve uma tag seguida apenas de uma direção; a direção
+  // sai da letra e a seção ficaria vazia ("[Verse]" sem letra).
+  const cru = `[Verse]
+(cantando suave)
+[chorus]
+Canta alto, porque o neon é teu
+O silêncio mora dentro do neon
+[Verse]
+Eu esperando o sol na esquina de bar
+Ficou meu copo meio cheio
+[Outro]
+(fim)`;
+
+  const out = applyLyricsPipeline(cru, {});
+  const blocos = out.split(/\n\s*\n/).filter((bloco) => bloco.trim());
+
+  assert.equal(blocos.length, 2, `esperava 2 seções, veio ${blocos.length}`);
+  for (const bloco of blocos) {
+    assert.ok(
+      bloco.split('\n').slice(1).some((linha) => linha.trim()),
+      `seção vazia na letra final:\n${out}`,
+    );
+  }
+  assert.ok(!/\[Verse\]\s*\n\s*\n/.test(out), 'não pode sobrar seção vazia');
+});

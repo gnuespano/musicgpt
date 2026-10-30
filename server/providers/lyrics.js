@@ -1648,7 +1648,11 @@ function bodyOf(block) {
  *   - último bloco muito menor que a média -> [Outro]
  *   - demais                     -> [Verse]
  */
-function assignSectionLabels(blocks, ctx = {}) {
+function assignSectionLabels(rawBlocks, ctx = {}) {
+  // Uma secao sem nenhum texto (so a tag; a direcao entre parenteses ja foi
+  // removida) nao pode virar bloco: geraria "[Verse]" vazio na letra final.
+  const blocks = rawBlocks.filter((block) => bodyOf(block).length > 0);
+  if (!blocks.length) return [];
   const bodies = blocks.map((block) => bodyOf(block));
   const keys = bodies.map((body) => normalizeKey(body.join(' ')));
   const counts = new Map();
@@ -1756,6 +1760,7 @@ export function addPerformanceCues(rawLyrics, context = {}) {
     if (!blocks.length) return text;
 
     const labelled = assignSectionLabels(blocks, ctx);
+    if (!labelled.length) return text;
 
     // Direção entre parênteses: SOMENTE se pedida explicitamente.
     const directions = buildDirectionCues(ctx);
