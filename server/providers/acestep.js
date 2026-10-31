@@ -102,13 +102,23 @@ export function normalizeAudioMode(mode) {
  * faixa de ~30s).
  *
  * PRIORIDADE DO TEXTO: quando o estilo veio do texto digitado pelo usuario
- * (`styleFromText`), esse texto JA esta no caption (o prompt) - o genero do
- * botao nao e acrescentado, para nao aparecer "Pop style" junto do texto
- * que o usuario escreveu.
+ * (`styleFromText`), o genero do botao nao e acrescentado, para nao aparecer
+ * "Pop style" junto do texto que o usuario escreveu.
+ *
+ * O ESTILO SEMPRE precisa entrar no caption. No app, `prompt` e `style` sao
+ * o mesmo texto (a caixa "Estilos"), entao ele ja chega em `text`. Mas um
+ * cliente da API pode mandar o TEMA em `prompt` e o ESTILO em `style` - ai o
+ * `style` e a unica copia do estilo e ele nao pode ser descartado. Por isso
+ * acrescentamos `style` quando ele ainda nao esta no prompt (evitando
+ * duplicar quando prompt e style sao o mesmo texto).
  */
 export function buildCaption({ prompt, style, styleFromText = false, genreLabel, moodLabel, lofi, instrumental, duration, keyLabel }) {
   const bits = [];
   const text = String(prompt || '').trim();
+  const styleText = String(style || '').trim();
+
+  // o estilo entra uma unica vez: se ja estiver no prompt, nao repetimos.
+  if (styleFromText && styleText && !text.includes(styleText)) bits.push(styleText);
   if (text) bits.push(text);
 
   const genre = styleFromText ? '' : (style || genreLabel);
