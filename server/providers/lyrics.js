@@ -32,6 +32,7 @@ import {
   groqAvailable,
   openRouterAvailable,
 } from '../config.js';
+import { buildSophisticatedStyle, isSophisticatedStyle } from './style.js';
 
 export const LOCAL_STYLE_EXPANSION_DICT = new Map([
   ['mpb', 'MPB melancolica com violao, pandeiro e saxofone ao fundo, ritmo moderado, voz sentimental'],
@@ -638,96 +639,108 @@ export function cleanLyric(text) {
 /**
  * Prompt para gerar descrições criativas de estilos musicais.
  */
-const STYLE_SYSTEM_PROMPT = 'Você é um especialista em música e estilos musicais. '
-  + 'Gere descrições criativas e detalhadas de estilos musicais em português do Brasil, '
-  + 'incluindo instrumentação característica e elementos sonoros. '
-  + 'A descrição deve ter entre 8 e 15 palavras.';
+const STYLE_SYSTEM_PROMPT = 'You are a senior music producer writing production prompts for AI music engines. '
+  + 'Write ONE dense English prompt (45 to 80 words, exactly 4 sentences, no line breaks) with this structure: '
+  + '(1) genre anchor, an optional nickname in quotes, the groove/tempo, the instrumentation, the drums and one texture; '
+  + '(2) the vocalist: subject, voice timbre, delivery and dynamic arc; '
+  + '(3) the theme, a twist of attitude, and the scene or vibe; '
+  + '(4) the hook, the chorus, the production style and the energy level. '
+  + 'Use precise production language. No filler, no lists, no explanations, no quotes around the whole prompt.';
 
-const STYLE_USER_PROMPT = 'Gere uma descrição curta e criativa de um estilo musical em português do Brasil. '
-  + 'Responda APENAS com a descrição, sem aspas, sem explicações, sem introdução. '
-  + 'Exemplos: "Rock alternativo dos anos 90 com guitarra distorcida e bateria seca", '
-  + '"Lo-fi chill com piano suave, chuva de fundo e textura de vinil", '
-  + '"Trap pesado com 808 grave, hi-hats rápidos e sintetizadores escuros". '
-  + 'Agora gere uma nova descrição criativa e original:';
+const STYLE_EXAMPLE = 'Brazilian sertanejo universitário "sofrência" with mid-tempo groove, '
+  + 'strong acoustic guitar rhythm, punchy drums, and subtle accordion. '
+  + 'Male vocalist with gritty, emotional voice, expressive delivery with dynamic intensity '
+  + '(soft verses, powerful chorus). Theme of heartbreak and betrayal, but with attitude and '
+  + 'drinking-night vibe. Catchy hook, memorable chorus, modern radio production, high energy, '
+  + 'engaging and not slow.';
 
 /**
- * Lista de estilos locais para fallback (mesma usada no frontend).
+ * Monta o pedido do usuario para o gerador de estilo, com o contexto
+ * (genero/clima/voz) escolhido no app.
  */
-const LOCAL_STYLE_SUGGESTIONS = [
-  'Rock alternativo dos anos 90 com guitarra distorcida e bateria seca',
-  'Lo-fi chill com piano suave, chuva de fundo e textura de vinil',
-  'Trap pesado com 808 grave, hi-hats rápidos e sintetizadores escuros',
-  'MPB melancólica com violão, pandeiro e saxofone ao fundo',
-  'Synthwave dos anos 80 com sintetizadores neon e bateria eletrônica',
-  'Samba de roda animado com pandeiro, cavaquinho e surdo no refrão',
-  'Funk brasileiro com tambor, baixo elétrico e bordões gritando',
-  'Pop dance dos anos 2000 com sintetizadores brilhantes e refrão grudento',
-  'Jazz de madrugada com piano, contrabaixo e saxofone quente',
-  'Bossa nova leve com violão de nylon e percussão discreta',
-  'Reggae tranquilo com baixo round, skank no violão e melodia solta',
-  'Rock progressivo com guitarra limpa, sintetizadores e solos longos',
-  'Forró de vaqueiro com sanfona, triângulo e bateria de baile',
-  'Gospel soul com coro, piano e dinâmica crescente no refrão',
-  'Indie folk acústico com violão, bumbo leve e vozes em dupla',
-  'House club com kick de quatro tempos, hi-hat e sintetizador pulsante',
-  'Balada de piano com cordas orquestrais e refrão em tom menor',
-  'K-pop animado com beat dance, sintetizadores brilhantes e refrão coreografado',
-  'R&B neosoul com baixo encorpado, Rhodes e grooves relaxados',
-  'Rockabilly dos anos 50 com guitarra twang, contrabaixo e bateria scrub',
-  'Amapiano com piano log drum, percussão africana e melodia etérea',
-  'Sertanejo universitário com viola, sanfona e batida em dois',
-];
+function styleUserPrompt(opts = {}) {
+  const genre = String(opts.genre || '').trim();
+  const mood = String(opts.mood || '').trim();
+  const vocals = String(opts.vocals || '').trim();
+  const contexto = [
+    genre ? `genre: ${genre}` : '',
+    mood ? `mood: ${mood}` : '',
+    vocals ? `vocal tone: ${vocals}` : '',
+  ].filter(Boolean).join(', ');
+  return 'Write a production prompt for an AI music engine, in English, following the structure of '
+    + 'the example below. '
+    + (contexto ? `Use this context (${contexto}). ` : '')
+    + 'Change every detail from the example: genre, nickname, groove, instruments, drums, texture, '
+    + 'vocal timbre, delivery, dynamics, theme, vibe, hook, chorus, production and energy. '
+    + 'Respond with ONLY the prompt, one line, no quotes, no explanation.\n\nExample:\n'
+    + STYLE_EXAMPLE;
+}
+
+
+
+/**
+ * Prazo TOTAL da geracao de estilo (a varinha magica nao pode travar).
+ */
+const STYLE_DEADLINE_MS = 3000;
 
 /**
  * Gera um estilo musical aleatório usando IA (NVIDIA/DeepSeek) com fallback local.
  * Retorna { style: string, engine: string }.
  */
-export async function generateMusicStyle() {
+export async function generateMusicStyle(options = {}) {
+  // A varinha precisa responder rapido: a IA tem um prazo TOTAL curto
+  // (STYLE_DEADLINE_MS). Estourou o prazo, o gerador estruturado local
+  // entrega na hora - ele ja e sofisticado e sempre varia.
+  const deadline = Date.now() + STYLE_DEADLINE_MS;
+
   // Tenta NVIDIA primeiro (se disponível)
-  if (nvidiaAvailable()) {
+  if (nvidiaAvailable() && deadline - Date.now() > 400) {
     try {
       log('[estilo] tentando gerar com NVIDIA NIM');
       await throttle('nvidia');
-      const result = await retryWithBackoff(() => callNvidiaForStyle(), 'nvidia');
+      const rest = Math.max(500, deadline - Date.now());
+      const result = await callNvidiaForStyle(options, rest);
       log(`[estilo] NVIDIA gerou: "${result.slice(0, 60)}"`);
-      return { style: result, engine: 'nvidia' };
+      if (isSophisticatedStyle(result)) return { style: result, engine: 'nvidia' };
+      log('[estilo] NVIDIA devolveu texto simples demais -> usando gerador estruturado');
+      return { style: buildSophisticatedStyle(options), engine: 'nvidia', fallback: 'resposta da IA reprovada no controle de qualidade' };
     } catch (err) {
       log(`[estilo] NVIDIA fora: ${primeiraLinha(err.message)} -> tentando DeepSeek`);
     }
   } else {
-    log('[estilo] NVIDIA_API_KEY ausente, pulando para DeepSeek');
+    log('[estilo] NVIDIA indisponivel ou sem tempo, pulando para DeepSeek');
   }
 
   // Fallback para DeepSeek (se disponível)
-  if (deepSeekAvailable()) {
+  if (deepSeekAvailable() && deadline - Date.now() > 400) {
     try {
       log('[estilo] tentando gerar com DeepSeek');
       await throttle('deepseek');
-      const result = await retryWithBackoff(() => callDeepSeekForStyle(), 'deepseek');
+      const rest = Math.max(500, deadline - Date.now());
+      const result = await callDeepSeekForStyle(options, rest);
       log(`[estilo] DeepSeek gerou: "${result.slice(0, 60)}"`);
-      return { style: result, engine: 'deepseek' };
+      if (isSophisticatedStyle(result)) return { style: result, engine: 'deepseek' };
+      log('[estilo] DeepSeek devolveu texto simples demais -> usando gerador estruturado');
+      return { style: buildSophisticatedStyle(options), engine: 'deepseek', fallback: 'resposta da IA reprovada no controle de qualidade' };
     } catch (err) {
       log(`[estilo] DeepSeek fora: ${primeiraLinha(err.message)} -> usando lista local`);
     }
   } else {
-    log('[estilo] DEEPSEEK_API_KEY ausente, usando lista local');
+    log('[estilo] DEEPSEEK_API_KEY ausente ou sem tempo, usando gerador local');
   }
 
-  // Fallback final: lista local
-  log('[estilo] usando lista local (fallback)');
-  const randomStyle = LOCAL_STYLE_SUGGESTIONS[
-    Math.floor(Math.random() * LOCAL_STYLE_SUGGESTIONS.length)
-  ];
-  return { style: randomStyle, engine: 'local' };
+  // Fallback final: gerador estruturado local (sempre varia)
+  log('[estilo] usando gerador estruturado local (fallback)');
+  return { style: buildSophisticatedStyle(options), engine: 'local' };
 }
 
 /**
  * Chama NVIDIA NIM para gerar um estilo musical.
  */
-async function callNvidiaForStyle() {
+async function callNvidiaForStyle(options = {}, timeoutMs = 2200) {
   log('pedindo estilo musical ao NVIDIA NIM');
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 8000); // 8s timeout (estilo e rapido)
+  const timer = setTimeout(() => controller.abort(), timeoutMs); // estilo e rapido
   let res;
   try {
     res = await fetch(`${NVIDIA.baseURL}/chat/completions`, {
@@ -740,10 +753,10 @@ async function callNvidiaForStyle() {
         model: NVIDIA.model,
         messages: [
           { role: 'system', content: STYLE_SYSTEM_PROMPT },
-          { role: 'user', content: STYLE_USER_PROMPT },
+          { role: 'user', content: styleUserPrompt(options) },
         ],
         temperature: 1.1, // alta criatividade
-        max_tokens: 100,
+        max_tokens: 220,
       }),
       signal: controller.signal,
     });
@@ -771,10 +784,10 @@ async function callNvidiaForStyle() {
 /**
  * Chama DeepSeek para gerar um estilo musical.
  */
-async function callDeepSeekForStyle() {
+async function callDeepSeekForStyle(options = {}, timeoutMs = 2200) {
   log('pedindo estilo musical ao DeepSeek');
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 8000); // 8s timeout
+  const timer = setTimeout(() => controller.abort(), timeoutMs); // estilo e rapido
   let res;
   try {
     res = await fetch(`${DEEPSEEK.baseURL}/chat/completions`, {
@@ -787,10 +800,10 @@ async function callDeepSeekForStyle() {
         model: DEEPSEEK.model,
         messages: [
           { role: 'system', content: STYLE_SYSTEM_PROMPT },
-          { role: 'user', content: STYLE_USER_PROMPT },
+          { role: 'user', content: styleUserPrompt(options) },
         ],
         temperature: 1.1, // alta criatividade
-        max_tokens: 100,
+        max_tokens: 220,
       }),
       signal: controller.signal,
     });

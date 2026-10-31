@@ -468,29 +468,107 @@ function syncStylePriority() {
  * Sugestões de ESTILO (descrições curtas que o motor local e o ACE-Step
  * entendem). A varinha do bloco "Estilos" sorteia uma delas.
  */
+/* ------------------------------------------------------------------ *
+ * Gerador local de estilos sofisticados (fallback offline da varinha)
+ *
+ * Espelha a estrutura do gerador do servidor: 4 frases em ingles
+ * (ancora/groove, vocal, tema, producao). Usado quando a API falha.
+ * ------------------------------------------------------------------ */
+
+const STYLE_ANCHORS = {
+  pop: ['modern radio pop', 'polished dance-pop'],
+  mpb: ['Brazilian MPB', 'intimate MPB'],
+  sertanejo: ['Brazilian sertanejo universitário', 'modern Brazilian sertanejo'],
+  forro: ['Brazilian forró', 'forró de vaqueiro'],
+  trap: ['modern trap', 'melodic trap'],
+  funk: ['Brazilian funk', 'heavy baile funk'],
+  funk_br: ['Brazilian funk', 'heavy baile funk'],
+  rock: ['modern rock', 'anthemic guitar rock'],
+  rock_nacional: ['Brazilian rock', 'contemporary Brazilian rock'],
+  samba: ['Brazilian samba', 'samba de roda'],
+  pagode: ['Brazilian pagode', 'modern pagode'],
+  lofi: ['lo-fi chill', 'late-night lo-fi'],
+  house: ['modern house', 'deep house'],
+  gospel: ['modern gospel soul', 'gospel choir'],
+  jazz: ['modern jazz', 'late-night jazz trio'],
+  ambient: ['cinematic ambient', 'atmospheric ambient'],
+};
+
+const STYLE_KITS = [
+  ['strong acoustic guitar rhythm', 'punchy drums', 'subtle accordion'],
+  ['warm nylon guitar picking', 'soft brushed kit', 'airy pad swells'],
+  ['rolling 808 bass', 'sharp hi-hat rolls', 'cinematic string pads'],
+  ['tight clean guitar', 'tight backbeat', 'glossy synth layers'],
+  ['brisk accordion melody', 'bouncy zabumba groove', 'tambourine flourishes'],
+  ['deep upright bass', 'brush-kit swing', 'muted trumpet answers'],
+  ['punchy synth bass', 'clapping layered backbeat', 'shimmering arpeggios'],
+  ['warm electric guitar fills', 'snare-forward live drums', 'tape saturation'],
+];
+
+const STYLE_NICKNAMES = ['sofrência', 'acre', 'saudade', 'faroeste', 'resposta', 'retrato', 'inveja', 'meia-noite'];
+const STYLE_VOCAL_SUBJECTS = ['Male vocalist', 'Female vocalist', 'Androgynous vocalist'];
+const STYLE_VOCAL_TIMBRES = ['gritty, emotional', 'warm, raspy', 'clear, husky', 'soft, breathy', 'rich, soulful'];
+const STYLE_DELIVERIES = ['expressive delivery', 'conversational delivery', 'belting delivery', 'restrained delivery'];
+const STYLE_DYNAMICS = [
+  'dynamic intensity (soft verses, powerful chorus)',
+  'dynamics that build from hushed verses to a belt',
+  'restrained verses exploding into a huge chorus',
+];
+const STYLE_THEMES = ['heartbreak and betrayal', 'longing and distance', 'fading love and late-night regret', 'new love and second chances'];
+const STYLE_TWISTS = ['but with attitude', 'but with swagger', 'with a hint of defiance', 'yet somehow hopeful'];
+const STYLE_VIBES = ['drinking-night vibe', 'midnight-drive mood', 'late-bar confessional mood', 'rooftop-party energy'];
+const STYLE_HOOKS = ['Catchy hook', 'Immediate hook', 'Singable hook', 'Memorable top line'];
+const STYLE_CHORUSES = ['memorable chorus', 'anthemic chorus', 'radio-ready chorus', 'chorus built for sing-along'];
+const STYLE_PRODUCTIONS = ['modern radio production', 'vintage analog production', 'streaming-ready production', 'warm tape production'];
+const STYLE_ENERGIES = ['high energy, engaging and not slow', 'explosive and danceable', 'steady build into a euphoric finish'];
+
+const stylePick = (list) => list[Math.floor(Math.random() * list.length)];
+
+/**
+ * Monta um estilo sofisticado completo (fallback local da varinha).
+ * @param {object} opts
+ * @param {string} [opts.genre]  genero escolhido (ancora do estilo)
+ * @param {string} [opts.avoid]  estilo anterior (nao pode repetir)
+ */
+function buildLocalSophisticatedStyle(opts = {}) {
+  const key = String(opts.genre || '').trim().toLowerCase();
+  const anchors = STYLE_ANCHORS[key] || ['modern radio track', 'contemporary production'];
+  let style = '';
+  for (let attempt = 0; attempt < 8; attempt++) {
+    const kit = stylePick(STYLE_KITS);
+    style = [
+      `${stylePick(anchors)} "${stylePick(STYLE_NICKNAMES)}" with ${stylePick([
+        'mid-tempo groove', 'driving modern groove', 'up-tempo groove', 'laid-back groove',
+      ])}, ${kit[0]}, ${kit[1]}, and ${kit[2]}.`,
+      `${stylePick(STYLE_VOCAL_SUBJECTS)} with ${stylePick(STYLE_VOCAL_TIMBRES)} voice, `
+        + `${stylePick(STYLE_DELIVERIES)} with ${stylePick(STYLE_DYNAMICS)}.`,
+      `Theme of ${stylePick(STYLE_THEMES)}, ${stylePick(STYLE_TWISTS)} and ${stylePick(STYLE_VIBES)}.`,
+      `${stylePick(STYLE_HOOKS)}, ${stylePick(STYLE_CHORUSES)}, ${stylePick(STYLE_PRODUCTIONS)}, ${stylePick(STYLE_ENERGIES)}.`,
+    ].join(' ');
+    if (style !== opts.avoid) break;
+  }
+  return style;
+}
+
 const STYLE_SUGGESTIONS = [
-  'Rock alternativo dos anos 90 com guitarra distorcida e bateria seca',
-  'Lo-fi chill com piano suave, chuva de fundo e textura de vinil',
-  'Trap pesado com 808 grave, hi-hats rápidos e sintetizadores escuros',
-  'MPB melancólica com violão, pandeiro e saxofone ao fundo',
-  'Synthwave dos anos 80 com sintetizadores neon e bateria eletrônica',
-  'Samba de roda animado com pandeiro, cavaquinho e surdo no refrão',
-  'Funk brasileiro com tambor, baixo elétrico e bordões gritando',
-  'Pop dance dos anos 2000 com sintetizadores brilhantes e refrão grudento',
-  'Jazz de madrugada com piano, contrabaixo e saxofone quente',
-  'Bossa nova leve com violão de nylon e percussão discreta',
-  'Reggae tranquilo com baixo round, skank no violão e melodia solta',
-  'Rock progressivo com guitarra limpa, sintetizadores e solos longos',
-  'Forró de vaqueiro com sanfona, triângulo e bateria de baile',
-  'Gospel soul com coro, piano e dinâmica crescente no refrão',
-  'Indie folk acústico com violão, bumbo leve e vozes em dupla',
-  'House club com kick de quatro tempos, hi-hat e sintetizador pulsante',
-  'Balada de piano com cordas orquestrais e refrão em tom menor',
-  'K-pop animado com beat dance, sintetizadores brilhantes e refrão coreografado',
-  'R&B neosoul com baixo encorpado, Rhodes e grooves relaxados',
-  'Rockabilly dos anos 50 com guitarra twang, contrabaixo e bateria scrub',
-  'Amapiano com piano log drum, percussão africana e melodia etérea',
-  'Sertanejo universitário com viola, sanfona e batida em dois',
+  'Brazilian sertanejo universitário "sofrência" with mid-tempo groove, strong acoustic guitar rhythm, punchy drums, and subtle accordion. Male vocalist with gritty, emotional voice, expressive delivery with dynamic intensity (soft verses, powerful chorus). Theme of heartbreak and betrayal, but with attitude and drinking-night vibe. Catchy hook, memorable chorus, modern radio production, high energy, engaging and not slow.',
+  'Brazilian MPB "saudade" with laid-back mid-tempo groove, warm nylon guitar picking, soft brushed kit, and airy pad swells. Female vocalist with warm, raspy voice, conversational delivery with restrained verses exploding into a huge chorus. Theme of fading love and late-night regret, but with swagger and late-bar confessional mood. Immediate hook, anthemic chorus, warm tape production, steady build into a euphoric finish.',
+  'Modern trap "meia-noite" with half-time groove, rolling 808 bass, sharp hi-hat rolls, and cinematic string pads. Androgynous vocalist with tight, clipped voice, restrained delivery with dynamics that build from hushed verses to a belt. Theme of longing and distance, but with attitude and midnight-drive mood. Singable hook, radio-ready chorus, streaming-ready production, high energy, engaging and not slow.',
+  'Brazilian forró "faroeste" with fast forró groove, brisk accordion melody, bouncy zabumba groove, and tambourine flourishes. Male vocalist with bright, festive voice, belting delivery with dynamic intensity (soft verses, powerful chorus). Theme of new love and second chances, with a hint of defiance and rooftop-party energy. Catchy hook, chorus built for sing-along, modern radio production, explosive and danceable.',
+  'Lo-fi chill "retrato" with slow laid-back groove, detuned electric keys, dusty boom-bap drums, and vinyl crackle. Female vocalist with soft, breathy voice, conversational delivery with tension in the verses and release in the refrain. Theme of a promise that was never kept, yet somehow hopeful and late-bar confessional mood. Memorable top line, unforgettable chorus, warm tape production, hypnotic drift with a gentle lift.',
+  'Modern house "inveja" with steady four-on-the-floor groove, filtered chord stabs, tight offbeat claps, and sweeping risers. Female vocalist with bright, polished voice, expressive delivery with restrained verses exploding into a huge chorus. Theme of new love and second chances, but with swagger and golden-hour cruising energy. Immediate hook, anthemic chorus, crisp modern mix, relentless drive from the first bar.',
+  'Brazilian samba "acre" with swinging mid-tempo groove, fluid cavaquinho picking, rolling samba percussion, and whistling apito lines. Male vocalist with warm, mellow voice, playful delivery with dynamic intensity (soft verses, powerful chorus). Theme of a city that never sleeps, but with attitude and open-road freedom. Catchy hook, radio-ready chorus, vintage analog production, rolling momentum that keeps the listener locked.',
+  'Modern rock "resposta" with driving up-tempo groove, crunchy power-chord guitars, heavy live drums, and tape-saturated riff textures. Male vocalist with gritty, powerful voice, belting delivery with restrained verses exploding into a huge chorus. Theme of heartbreak and betrayal, but with swagger and rain-on-the-window mood. Singable hook, anthemic chorus, warm tape production, relentless drive from the first bar.',
+  'Contemporary Brazilian rock "saudade" with anthemic rolling groove, clean electric guitar tone, tight live kit, and brass stabs. Male vocalist with rough, raspy voice, expressive delivery with dynamics that build from hushed verses to a belt. Theme of heartbreak and betrayal, yet somehow hopeful and rooftop-party energy. Memorable top line, unforgettable chorus, modern radio production, explosive and danceable.',
+  'Modern gospel soul "sofrência" with building mid-tempo groove, warm Hammond organ, shaking tambourine groove, and layered choir stacks. Female vocalist with soulful, choir-backed voice, belting delivery with dynamic intensity (soft verses, powerful chorus). Theme of longing and distance, but with attitude and late-bar confessional mood. Catchy hook, anthemic chorus, vintage analog production, euphoric payoff with no filler.',
+  'Late-night jazz trio "meia-noite" with relaxed mid-tempo swing, warm upright bass walk, brush-kit swing, and muted trumpet answers. Female vocalist with smoky, husky voice, restrained delivery with tension in the verses and release in the refrain. Theme of longing and distance, but with swagger and late-bar confessional mood. Immediate hook, memorable chorus, warm tape production, controlled energy with a big final chorus.',
+  'Cinematic ambient "retrato" with slow ambient flow, slow piano motifs, barely-there brushed pulse, and airy reverb tails. Female vocalist with airy, ethereal voice, restrained delivery with dynamics that build from hushed verses to a belt. Theme of homesickness in a crowded city, yet somehow hopeful and cinematic late-night mood. Memorable top line, unforgettable chorus, streaming-ready production, calm and spacious, slow but never boring.',
+  'Heavy baile funk "inveja" with heavy mid-tempo groove, syncopated tambor pattern, hard baile drums, and dark synth stabs. Male vocalist with tight, clipped voice, restrained delivery with restrained verses exploding into a huge chorus. Theme of heartbreak and betrayal, but with swagger and midnight-drive mood. Catchy hook, chorus built for sing-along, modern radio production, relentless drive from the first bar.',
+  'Modern country-pop "resposta" with rolling two-step pocket, warm electric guitar fills, tight backbeat, and subtle accordion. Male vocalist with twangy, rural voice, expressive delivery with dynamic intensity (soft verses, powerful chorus). Theme of fading love and late-night regret, but with attitude and drinking-night vibe. Singable hook, radio-ready chorus, vintage analog production, steady build into a euphoric finish.',
+  'Brazilian pagode "acre" with bouncy mid-tempo pocket, cavalinho hook, driving pagode kit, and tantã scrapes. Female vocalist with bright, festive voice, playful delivery with tension in the verses and release in the refrain. Theme of new love and second chances, but with swagger and golden-hour cruising energy. Immediate hook, anthemic chorus, modern radio production, explosive and danceable.',
+  'Polished dance-pop "saudade" with up-tempo groove, bright electric guitar hooks, layered clapping backbeat, and shimmering arpeggios. Female vocalist with bright, polished voice, belting delivery with dynamic intensity (soft verses, powerful chorus). Theme of new love and second chances, but with attitude and rooftop-party energy. Catchy hook, anthemic chorus, crisp modern mix, relentless drive from the first bar.',
+  'Deep house "meia-noite" with rolling club groove, acid synth line, four-on-the-floor kick, and airy pad layers. Androgynous vocalist with clear, radio-ready voice, expressive delivery with restrained verses exploding into a huge chorus. Theme of a city that never sleeps, but with swagger and cinematic late-night mood. Memorable top line, radio-ready chorus, streaming-ready production, euphoric payoff with no filler.',
+  'Gospel choir "inveja" with uplifting up-tempo groove, expressive piano lines, punchy gospel kit, and handclaps and foot stomps. Male vocalist with powerful, church-trained voice, belting delivery with dynamic intensity (soft verses, powerful chorus). Theme of longing and distance, yet somehow hopeful and golden-hour cruising energy. Catchy hook, unforgettable chorus, warm tape production, steady build into a euphoric finish.',
 ];
 
 /**
@@ -1745,7 +1823,14 @@ function bind() {
     btn.title = 'Gerando estilo com IA...';
     
     try {
-      const res = await api('/api/generate-style');
+      const res = await api('/api/generate-style', {
+        method: 'POST',
+        body: {
+          genre: selectedGenre(),
+          mood: $('#mood')?.value || '',
+          vocals: $('#voice')?.value || '',
+        },
+      });
       campo.value = res.style || '';
       syncStylePriority();
       magicEffect(campo, btn);
@@ -1766,7 +1851,10 @@ function bind() {
       }
     } catch (err) {
       // Fallback local se a API falhar completamente
-      const sugestao = pickRandom(STYLE_SUGGESTIONS, campo.value.trim());
+      const sugestao = buildLocalSophisticatedStyle({
+        genre: selectedGenre(),
+        avoid: campo.value.trim(),
+      }) || pickRandom(STYLE_SUGGESTIONS, campo.value.trim());
       if (sugestao) {
         campo.value = sugestao;
         syncStylePriority();

@@ -26,6 +26,7 @@ import {
   addPerformanceCues,
   breakLyricsIntoSyllableLines,
 } from './providers/lyrics.js';
+import { buildSophisticatedStyle } from './providers/style.js';
 import { generateMusic } from './providers/music.js';
 import { aceStepStatus, normalizeAudioMode } from './providers/acestep.js';
 import { generateLyrics as generateLocalLyrics, lyricTheme } from './lyrics.js';
@@ -910,9 +911,22 @@ export const handlers = {
    * Gera uma descrição criativa de estilo musical usando IA (NVIDIA/DeepSeek)
    * com fallback na lista local. Usado pela varinha mágica do campo "Estilos".
    */
-  async generateStyle(_req, res) {
+  async generateStyle(req, res) {
+    // contexto opcional (genero/clima/voz escolhidos no app) - o gerador
+    // usa para ancorar o estilo; GET sem corpo tambem funciona.
+    let body = {};
     try {
-      const result = await generateMusicStyle();
+      body = await readJson(req);
+    } catch {
+      body = {};
+    }
+    const options = {
+      genre: String(body.genre || '').trim(),
+      mood: String(body.mood || '').trim(),
+      vocals: String(body.vocals || '').trim(),
+    };
+    try {
+      const result = await generateMusicStyle(options);
       console.log(`[API /api/generate-style] engine=${result.engine} style="${result.style.slice(0, 50)}"`);
       return json(res, 200, { 
         style: result.style, 
@@ -921,15 +935,8 @@ export const handlers = {
       });
     } catch (error) {
       console.error(`[API /api/generate-style] ERRO: ${error.message}`);
-      // fallback absoluto: nunca quebra
-      const LOCAL_STYLES = [
-        'Rock alternativo dos anos 90 com guitarra distorcida e bateria seca',
-        'Lo-fi chill com piano suave, chuva de fundo e textura de vinil',
-        'Trap pesado com 808 grave, hi-hats rápidos e sintetizadores escuros',
-        'MPB melancólica com violão, pandeiro e saxofone ao fundo',
-        'Synthwave dos anos 80 com sintetizadores neon e bateria eletrônica',
-      ];
-      const style = LOCAL_STYLES[Math.floor(Math.random() * LOCAL_STYLES.length)];
+      // fallback absoluto: nunca quebra - gerador estruturado local
+      const style = buildSophisticatedStyle(options);
       return json(res, 200, { style, engine: 'local', fallback: error.message });
     }
   },

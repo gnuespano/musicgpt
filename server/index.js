@@ -37,6 +37,7 @@ const ROUTES = [
   ['GET', '/api/jobs/:id/events', handlers.jobEvents],
   ['POST', '/api/lyrics', handlers.lyrics],
   ['GET', '/api/generate-style', handlers.generateStyle],
+  ['POST', '/api/generate-style', handlers.generateStyle],
   ['GET', '/api/tracks', handlers.listTracks],
   ['GET', '/api/tracks/:id', handlers.getTrack],
   ['DELETE', '/api/tracks/:id', handlers.deleteTrack],
