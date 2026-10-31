@@ -235,7 +235,13 @@ check('normalizeAudioMode: valor desconhecido vira reference',
  * 2. HTTP: a rota guarda o modo na faixa
  * ------------------------------------------------------------------ */
 
-const server = await startServer({ MUSICGPT_MUSIC_PROVIDER: 'local' });
+const server = await startServer({
+  MUSICGPT_MUSIC_PROVIDER: 'local',
+  // letra local: o teste mede o modo cover (audio de referencia), nao a
+  // qualidade da letra. Na NVIDIA, a letra travada consome o orcamento
+  // de 120s do navegador e o teste fica instavel.
+  MUSICGPT_LYRICS_PROVIDER: 'local',
+});
 
 try {
   const wav = makeWav();
@@ -308,7 +314,7 @@ fs.writeFileSync(refFile, makeWav(3));
 
 const appServer = await startServer(LIVE
   ? { MUSICGPT_MUSIC_PROVIDER: 'acestep' }
-  : { MUSICGPT_MUSIC_PROVIDER: 'local' });
+  : { MUSICGPT_MUSIC_PROVIDER: 'local', MUSICGPT_LYRICS_PROVIDER: 'local' });
 
 const browser = await launchChrome({ port: 9336 });
 

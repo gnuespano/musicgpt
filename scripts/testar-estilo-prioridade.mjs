@@ -202,7 +202,13 @@ check('texto + audio de referencia: o bloco input_audio continua no pedido',
  * 2. HTTP: a rota guarda o texto como estilo da faixa
  * ------------------------------------------------------------------ */
 
-const server = await startServer({ MUSICGPT_MUSIC_PROVIDER: 'local' });
+const server = await startServer({
+  MUSICGPT_MUSIC_PROVIDER: 'local',
+  // letra local: este teste mede PRIORIDADE DE ESTILO, nao qualidade de
+  // letra. Deixar a letra na NVIDIA makes o teste depender da rede e
+  // estourar o orcamento de 120s do navegador quando a API nao responde.
+  MUSICGPT_LYRICS_PROVIDER: 'local',
+});
 
 try {
   const comEstilo = await fetch(`${server.url}/api/generate`, {
@@ -256,7 +262,7 @@ fs.writeFileSync(refFile, makeWav(3));
 
 const appServer = await startServer(LIVE
   ? { MUSICGPT_MUSIC_PROVIDER: 'acestep' }
-  : { MUSICGPT_MUSIC_PROVIDER: 'local' });
+  : { MUSICGPT_MUSIC_PROVIDER: 'local', MUSICGPT_LYRICS_PROVIDER: 'local' });
 
 const browser = await launchChrome({ port: 9334 });
 

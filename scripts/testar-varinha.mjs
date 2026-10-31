@@ -195,8 +195,10 @@ try {
   // a varinha agora entrega um PROMPT DE PRODUCAO (4 frases em ingles):
   // ancora/groove, vocal, tema e ficha de producao
   const palavras = (t) => t.split(/\s+/).filter(Boolean).length;
-  const sofisticado = (t) => palavras(t) >= 40
-    && (t.match(/\./g) || []).length >= 3
+  // mesmos criterios de server/providers/style.js (isSophisticatedStyle):
+  // 4 frases (ponto OU virgula), 50+ palavras, vocal + hook/chorus/producao.
+  const sofisticado = (t) => palavras(t) >= 50
+    && (t.match(/[.;]/g) || []).length >= 4
     && /(vocalist|vocal|voice)/i.test(t)
     && /(hook|top line)/i.test(t)
     && /chorus/i.test(t)
@@ -205,6 +207,46 @@ try {
     sofisticado(estilo1), `${palavras(estilo1)} palavras: ${estilo1.slice(0, 110)}`);
   check('o estilo da 2a varinha tambem e sofisticado',
     sofisticado(estilo2), `${palavras(estilo2)} palavras: ${estilo2.slice(0, 110)}`);
+
+  /* ---------------------------------------------------------------- *
+   * 2b. Fallback offline: com a API fora, a varinha ainda preenche o
+   *     campo com um estilo de qualidade (gerador local do cliente).
+   * ---------------------------------------------------------------- */
+
+  // derruba so a rota de estilo; o resto da pagina continua funcionando
+  await browser.cdp.eval(`(() => {
+    if (!window.__fetchOriginal) window.__fetchOriginal = window.fetch;
+    window.fetch = function (input, init) {
+      const url = typeof input === 'string' ? input : (input && input.url) || '';
+      if (url.includes('/api/generate-style')) {
+        return Promise.reject(new Error('rede fora (teste)'));
+      }
+      return window.__fetchOriginal.apply(this, arguments);
+    };
+    return true;
+  })`);
+
+  await browser.cdp.eval(`(() => { document.querySelector('#prompt').value = ''; return true; })`);
+  await delay(150);
+  await realClick(browser.cdp, '#btnStyleWand');
+
+  let estiloOffline = '';
+  for (let i = 0; i < 60; i++) {
+    await delay(250);
+    const current = await browser.cdp.eval(`(() => document.querySelector('#prompt').value.trim())`);
+    if (current.length > 10) { estiloOffline = current; break; }
+  }
+
+  check('com a API fora a varinha ainda preenche o campo', estiloOffline.length > 10,
+    estiloOffline.slice(0, 90));
+  check('o fallback offline tambem e sofisticado (prompt de producao)',
+    sofisticado(estiloOffline), `${palavras(estiloOffline)} palavras: ${estiloOffline.slice(0, 110)}`);
+
+  // restaura a rede normal para as sessoes seguintes
+  await browser.cdp.eval(`(() => {
+    if (window.__fetchOriginal) window.fetch = window.__fetchOriginal;
+    return true;
+  })`);
 
   /* ---------------------------------------------------------------- *
    * 3. Lampada 💡 de "Letra": usa o tema do campo e GERA a letra

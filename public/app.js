@@ -545,9 +545,42 @@ function buildLocalSophisticatedStyle(opts = {}) {
       `Theme of ${stylePick(STYLE_THEMES)}, ${stylePick(STYLE_TWISTS)} and ${stylePick(STYLE_VIBES)}.`,
       `${stylePick(STYLE_HOOKS)}, ${stylePick(STYLE_CHORUSES)}, ${stylePick(STYLE_PRODUCTIONS)}, ${stylePick(STYLE_ENERGIES)}.`,
     ].join(' ');
+    // mesma margem do servidor: a combinacao mais curta de fragmentos fica
+    // com ~50 palavras, e o piso de qualidade do pedido e 50. Garantimos
+    // folga para o fallback offline nunca entregar um estilo curto.
+    style = garantirTamanhoMinimoEstilo(style);
     if (style !== opts.avoid) break;
   }
   return style;
+}
+
+/**
+ * Complementa o estilo ate o piso de palavras sem criar uma 5a frase nem
+ * repetir o que ja esta no texto. Espelha server/providers/style.js.
+ */
+function garantirTamanhoMinimoEstilo(style) {
+  const MIN = 60;
+  const extras = [
+    'with wide stereo width across the mix',
+    'keeping the low end tight and controlled',
+    'with a touch of tape saturation for warmth',
+    'and a drummer locked to the pocket',
+    'with crisp vocal presence up front',
+    'and a dynamic build across every section',
+    'with live percussion accents on the backbeat',
+    'and a wide-open final chorus',
+    'with detailed percussion and organic texture',
+    'keeping the arrangement tight and focused',
+  ];
+  let out = style;
+  let i = 0;
+  while (out.split(/\s+/).filter(Boolean).length < MIN && i < extras.length) {
+    const extra = extras[(i + Math.floor(Math.random() * extras.length)) % extras.length];
+    i += 1;
+    if (out.includes(extra)) continue;
+    out = out.replace(/\.\s*$/, `, ${extra}.`);
+  }
+  return out;
 }
 
 const STYLE_SUGGESTIONS = [
