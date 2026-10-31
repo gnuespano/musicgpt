@@ -283,6 +283,10 @@ export function buildRequestBody({ prompt, lyrics, style, styleFromText = false,
 
   if (ACESTEP.model) body.model = ACESTEP.model;
 
+  // a caption exata que vai no <prompt> do pedido. Devolvida para a faixa
+  // registrar o texto que o modelo realmente recebeu.
+  body.captionSent = caption;
+
   return body;
 }
 
@@ -596,6 +600,9 @@ export async function generateAceMusic(prompt, lyrics, style, options = {}) {
   meta.sampleMode = Boolean(body.sample_mode);
   // modo Natural Language: o tema foi expandido pelo LM 5Hz (sample_query)
   meta.sampleQuery = body.sample_query || null;
+  // a caption EXATA que foi enviada ao modelo. A resposta do LM traz a
+  // caption reescrita dele (meta.caption); esta e a nossa, antes do envio.
+  meta.captionSent = body.captionSent || '';
   meta.caption = meta.caption || buildCaption({
     prompt,
     style,

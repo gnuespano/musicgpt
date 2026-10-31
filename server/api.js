@@ -507,6 +507,8 @@ async function executeJob(job, options, referenceAudio = null) {
       moodLabel: options.moodLabel,
       // estilo usado na geracao (texto digitado > botao de genero)
       style: options.styleLabel || options.style,
+      // caption enviada ao modelo de musica (o que o ACE-Step recebeu)
+      caption: result.meta?.captionSent || '',
       styleLabel: options.styleLabel,
       styleSource: options.styleSource,
       instrumental: Boolean(options.instrumental),
@@ -595,6 +597,9 @@ export const handlers = {
   health(_req, res) {
     json(res, 200, {
       ok: true,
+      // commit do deploy (Render injeta RENDER_GIT_COMMIT). Serve para
+      // confirmar qual codigo esta no ar sem precisar deduzir pelo resultado.
+      commit: process.env.RENDER_GIT_COMMIT || null,
       musicProvider: activeMusicProvider(),
       lyricsProvider: activeLyricsProvider(),
       mainLyricsProvider: mainLyricsProvider(),

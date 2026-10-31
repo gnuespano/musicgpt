@@ -185,6 +185,12 @@ try {
     promptEnviado.split(ESTILO).length - 1 === 1, String(promptEnviado.split(ESTILO).length - 1));
   check('http: a faixa guarda o estilo digitado', faixa?.style === ESTILO, JSON.stringify(faixa?.style));
   check('http: a origem do estilo e o texto', faixa?.styleSource === 'text', JSON.stringify(faixa?.styleSource));
+  // a caption gravada na faixa e a mesma que foi enviada ao modelo: e o que
+  // permite auditar a producao sem precisar interceptar o trafego.
+  check('http: a faixa guarda a caption enviada ao modelo',
+    String(faixa?.caption || '').includes(ESTILO), String(faixa?.caption || '').slice(0, 220));
+  check('http: a caption gravada tem o tema tambem',
+    String(faixa?.caption || '').includes(TEMA), String(faixa?.caption || '').slice(0, 220));
 } finally {
   server.child.kill('SIGKILL');
   fs.rmSync(server.dataDir, { recursive: true, force: true, maxAttempts: 3 });
