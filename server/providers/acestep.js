@@ -283,8 +283,9 @@ export function buildRequestBody({ prompt, lyrics, style, styleFromText = false,
 
   if (ACESTEP.model) body.model = ACESTEP.model;
 
-  // a caption exata que vai no <prompt> do pedido. Devolvida para a faixa
-  // registrar o texto que o modelo realmente recebeu.
+  // a caption exata que vai no <prompt> do pedido. Va como propriedade
+  // fora do corpo HTTP: `callApi` a remove antes de enviar (a API nao
+  // precisa dela) e a faixa usa para registrar o texto recebido pelo modelo.
   body.captionSent = caption;
 
   return body;
@@ -354,6 +355,8 @@ async function callApi(body) {
 
   for (const model of candidates) {
     const payload = { ...body };
+    // `captionSent` e nosso marcador interno: nao faz parte da API.
+    delete payload.captionSent;
     if (model) payload.model = model;
     try {
       return await postChatCompletion(payload, ACESTEP.timeoutMs);
