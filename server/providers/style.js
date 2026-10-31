@@ -384,6 +384,12 @@ export function buildSophisticatedStyle(opts = {}) {
       `${hook}, ${chorus}, ${production}, ${energy}.`,
     ].join(' ');
 
+    // Margem de seguranca sobre o piso do gate (50 palavras): as frases sao
+    // montadas de fragmentos e a combinacao mais curta fica com ~54. A
+    // 4a frase (hook/chorus/producao) recebe detalhe extra - sem mudar a
+    // estrutura de 4 frases nem repetir o que ja foi dito.
+    style = garantirTamanhoMinimo(style, rnd);
+
     if (seed === undefined && style === lastStyle) continue;
     break;
   }
@@ -392,16 +398,51 @@ export function buildSophisticatedStyle(opts = {}) {
 }
 
 /**
+ * Complementa o estilo ate atingir o piso de palavras, sem criar uma 5a
+ * frase (o padrao e 4 frases) e sem repetir o que ja esta no texto.
+ */
+function garantirTamanhoMinimo(style, rnd) {
+  const MIN = 60;
+  const extras = [
+    'with wide stereo width across the mix',
+    'keeping the low end tight and controlled',
+    'with a touch of tape saturation for warmth',
+    'and a drummer locked to the pocket',
+    'with crisp vocal presence up front',
+    'and a dynamic build across every section',
+    'with live percussion accents on the backbeat',
+    'and a wide-open final chorus',
+    'with detailed percussion and organic texture',
+    'keeping the arrangement tight and focused',
+  ];
+  let out = style;
+  let i = 0;
+  while (out.split(/\s+/).filter(Boolean).length < MIN && i < extras.length) {
+    const extra = extras[(i + Math.floor(rnd() * extras.length)) % extras.length];
+    i += 1;
+    if (out.includes(extra)) continue;
+    // a 4a frase termina com ponto: o extra entra antes dele
+    out = out.replace(/\.\s*$/, `, ${extra}.`);
+  }
+  return out;
+}
+
+/**
  * Quality gate: o texto tem estrutura de prompt de producao?
  * Usado para aceitar/rejeitar a resposta da IA antes de devolver.
  */
 export function isSophisticatedStyle(text) {
   const s = String(text || '').trim();
-  if (s.length < 120) return false;
+  if (s.length < 320) return false;
   if (s.includes('\n')) return false;
-  if ((s.match(/\./g) || []).length < 3) return false;
+  // 4 frases. A IA as vezes escreve as 4 como blocos separados por ponto e
+  // virgula em vez de ponto final, entao contamos os dois separadores.
+  const sentences = (s.match(/[.;]/g) || []).length;
+  if (sentences < 4) return false;
   const words = s.split(/\s+/).filter(Boolean);
-  if (words.length < 28) return false;
+  // ~50+ palavras: o exemplo de referencia do usuario tem 55. O piso
+  // fica nesse patamar - aceita o exemplo e rejeita estilos curtos.
+  if (words.length < 50) return false;
   return /vocal|voice|delivery/i.test(s) && /hook|chorus|production|mix/i.test(s);
 }
 

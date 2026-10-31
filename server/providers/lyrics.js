@@ -640,7 +640,7 @@ export function cleanLyric(text) {
  * Prompt para gerar descrições criativas de estilos musicais.
  */
 const STYLE_SYSTEM_PROMPT = 'You are a senior music producer writing production prompts for AI music engines. '
-  + 'Write ONE dense English prompt (45 to 80 words, exactly 4 sentences, no line breaks) with this structure: '
+  + 'Write ONE dense English prompt (60 to 85 words, exactly 4 sentences, no line breaks) with this structure: '
   + '(1) genre anchor, an optional nickname in quotes, the groove/tempo, the instrumentation, the drums and one texture; '
   + '(2) the vocalist: subject, voice timbre, delivery and dynamic arc; '
   + '(3) the theme, a twist of attitude, and the scene or vibe; '
@@ -681,7 +681,10 @@ function styleUserPrompt(opts = {}) {
 /**
  * Prazo TOTAL da geracao de estilo (a varinha magica nao pode travar).
  */
-const STYLE_DEADLINE_MS = 3000;
+// Prazo total da geracao de estilo com IA. Modelos de raciocinio (gpt-oss)
+// levam ~6-7s so para pensar; 3s cortava toda a IA antes da primeira
+// palavra. O gerador estruturado local continua sendo o caminho instantaneo.
+const STYLE_DEADLINE_MS = 8500;
 
 /**
  * Gera um estilo musical aleatório usando IA (NVIDIA/DeepSeek) com fallback local.
@@ -735,15 +738,164 @@ export async function generateMusicStyle(options = {}) {
 }
 
 /**
+ * Executa uma chamada HTTP respeitando um prazo real.
+ *
+ * Nesta plataforma o `AbortController` sinaliza no tempo, mas o `fetch` so
+ * rejeita muito depois (medido: abort em 5s, rejeicao em 41s) - o event loop
+ * do Termux nao consegue interromper a espera de rede a tempo. Por isso o
+ * prazo e TAMBEM uma corrida de promessas: quando o prazo vence, a funcao
+ * rejeita na hora e o fallback local assume, mesmo que o socket continue
+ * pendurado em segundo plano.
+ */
+async function fetchWithDeadline(url, init, timeoutMs) {
+  const limite = Math.max(500, Number(timeoutMs) || 7000);
+  const controller = new AbortController();
+  const timer = setTimeout(() => {
+    try { controller.abort(); } catch { /* ja abortado */ }
+  }, limite);
+  let guarda;
+  const venceu = new Promise((_, reject) => {
+    guarda = setTimeout(() => reject(new Error(`prazo de ${limite}ms estourado`)), limite);
+  });
+  try {
+    return await Promise.race([fetch(url, { ...init, signal: controller.signal }), venceu]);
+  } finally {
+    clearTimeout(timer);
+    clearTimeout(guarda);
+  }
+}
+
+/**
+ * Le o corpo da resposta respeitando o prazo. O streaming do corpo pode
+ * ficar pendurado mesmo depois dos headers chegarem.
+ */
+async function readWithDeadline(res, timeoutMs) {
+  const limite = Math.max(500, Number(timeoutMs) || 7000);
+  let guarda;
+  const venceu = new Promise((_, reject) => {
+    guarda = setTimeout(() => reject(new Error(`prazo de ${limite}ms estourado lendo a resposta`)), limite);
+  });
+  try {
+    return await Promise.race([res.text(), venceu]);
+  } finally {
+    clearTimeout(guarda);
+  }
+}
+
+/**
+ * Extrai o texto do estilo da resposta de um provider OpenAI-compatible.
+ *
+ * Modelos de raciocinio (ex.: gpt-oss-20b) gastam tokens em
+ * `reasoning_content`/`reasoning` e podem devolver `content: null` quando o
+ * limite de tokens corta a resposta. Nesses casos o texto util esta dentro
+ * do raciocinio, no final. Sem esta extracao a IA so devolvia vazio e o
+ * gerador local acabava sempre respondendo.
+ *
+ * @param {object} payload resposta JSON do provider
+ * @returns {string} texto do estilo (vazio se nao houver)
+ */
+function extractStyleText(payload) {
+  const msg = payload?.choices?.[0]?.message || {};
+  const candidatos = [
+    msg.content,
+    Array.isArray(msg.content) ? msg.content.map((p) => p?.text || '').join(' ') : '',
+    msg.reasoning_content,
+    msg.reasoning,
+  ];
+  for (const c of candidatos) {
+    const t = String(c || '').trim();
+    if (t) return t;
+  }
+  return '';
+}
+
+/**
+ * O trecho parece um prompt de producao pronto para uso?
+ * Mesmos criterios do controle de qualidade, mas tolerante a ponto final
+ * ausente (o ponto final e adicionado depois, em finalizeStyleText).
+ */
+function parecePromptDeProducao(texto) {
+  const t = String(texto || '').trim();
+  if (t.length < 320) return false;
+  const palavras = t.split(/\s+/).filter(Boolean).length;
+  const frases = (t.match(/[.;]/g) || []).length + (/[.!?]$/.test(t) ? 0 : 1);
+  if (palavras < 50 || frases < 4) return false;
+  return /vocal|voice|delivery/i.test(t) && /hook|chorus|production|mix/i.test(t);
+}
+
+/**
+ * Isola o estilo dentro de um texto de raciocinio: o modelo as vezes escreve
+ * o raciocinio e depois o prompt final, as vezes so o raciocinio. Pegamos a
+ * ultima linha longa que parece o prompt final.
+ */
+function pickFinalPrompt(text) {
+  const t = String(text || '').trim();
+  if (!t) return '';
+
+  // 1) marcadores de raciocinio proprios da API
+  const limpo = t
+    .replace(/<\/think>|<\|thinking\|>|<\|channel\|>.*?<\|message\|>/gis, ' ')
+    .replace(/<\|[a-z_]+\|>/gi, ' ')
+    .trim();
+
+  // 2) o modelo costuma narrar o raciocinio ("The user wants a production
+  //    prompt. Reasoning...") e so depois escrever o prompt. Em vez de
+  //    adivinhar o preambulo com regex, testamos os cortes possiveis e
+  //    ficamos com o primeiro que parece um prompt de producao completo
+  //    (4 frases, 60+ palavras, com vocal e hook).
+  const partes = [];
+  // cada ponto/virgula e um ponto de corte possivel do preambulo
+  for (const m of limpo.matchAll(/[.;]/g)) partes.push(m.index + 1);
+  // marcadores de raciocinio que nao terminam em pontuacao
+  for (const m of limpo.matchAll(/\b(?:reasoning|thinking|thought|analysis)\b\s*(?:\.\.\.|[:\-])\s*/gi)) {
+    partes.push(m.index + m[0].length);
+  }
+  partes.sort((a, b) => a - b);
+
+  // 2b) o corte explicito: depois de um marcador de raciocinio vem o prompt.
+  //     Usamos este corte quando ele produz um prompt valido - ele e o
+  //     preambulo exato, sem chute.
+  const explicitos = [];
+  for (const m of limpo.matchAll(/\b(?:reasoning|thinking|thought|analysis)\b\s*(?:\.\.\.|[:\-])\s*/gi)) {
+    explicitos.push(limpo.slice(m.index + m[0].length).trim());
+  }
+  for (const cand of explicitos) {
+    const valido = parecePromptDeProducao(cand);
+    if (valido) return cand;
+  }
+
+  // 2c) sem marcador explicito: tentamos os cortes por pontuacao e ficamos
+  //     com o PRIMEIRO que ja parece o prompt (o preambulo vem antes).
+  for (const corte of partes) {
+    const resto = limpo.slice(corte).trim();
+    if (parecePromptDeProducao(resto)) return resto;
+  }
+
+  // 3) sem corte valido: devolve o texto inteiro (o gate decide depois)
+  return limpo;
+}
+
+/**
+ * Normaliza o texto do estilo: tira aspas envolventes e garante ponto final.
+ * O ponto final e mantido de proposito - o controle de qualidade conta as
+ * frases, e cortar o ponto do fim faria a ultima frase sumir da contagem.
+ */
+function finalizeStyleText(text) {
+  const t = String(text || '').trim().replace(/^["'`]+|["'`]+$/g, '').trim();
+  if (!t) return '';
+  return /[.!?]$/.test(t) ? t : `${t}.`;
+}
+
+/**
  * Chama NVIDIA NIM para gerar um estilo musical.
  */
-async function callNvidiaForStyle(options = {}, timeoutMs = 2200) {
+async function callNvidiaForStyle(options = {}, timeoutMs = 7000) {
   log('pedindo estilo musical ao NVIDIA NIM');
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs); // estilo e rapido
+  const timer = setTimeout(() => controller.abort(), timeoutMs); // rede + corpo, 7s
   let res;
   try {
-    res = await fetch(`${NVIDIA.baseURL}/chat/completions`, {
+    res = await fetchWithDeadline(`${NVIDIA.baseURL}/chat/completions`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -756,15 +908,17 @@ async function callNvidiaForStyle(options = {}, timeoutMs = 2200) {
           { role: 'user', content: styleUserPrompt(options) },
         ],
         temperature: 1.1, // alta criatividade
-        max_tokens: 220,
+        max_tokens: Number(process.env.NVIDIA_MAX_TOKENS || 2500),
+        // o gpt-oss-20b gasta tokens no raciocinio ANTES do texto; sem isso
+        // o `content` volta null e o estilo se perde no meio do raciocinio.
+        reasoning_effort: (process.env.NVIDIA_REASONING_EFFORT || 'low').trim(),
       }),
-      signal: controller.signal,
-    });
+    }, timeoutMs);
   } finally {
     clearTimeout(timer);
   }
 
-  const raw = await res.text();
+  const raw = await readWithDeadline(res, timeoutMs);
   let payload = null;
   try { payload = JSON.parse(raw); } catch { /* tratado abaixo */ }
   if (!res.ok) {
@@ -772,11 +926,14 @@ async function callNvidiaForStyle(options = {}, timeoutMs = 2200) {
     throw new Error(`NVIDIA respondeu ${res.status}: ${motivo}`);
   }
 
-  const content = String(payload?.choices?.[0]?.message?.content || '').trim();
-  if (!content) throw new Error('NVIDIA não retornou conteúdo');
+  const raw_text = extractStyleText(payload);
+  if (!raw_text) throw new Error('NVIDIA não retornou conteúdo');
 
-  // Limpa a resposta (remove aspas, pontos finais desnecessários)
-  const clean = content.replace(/^["'`]+|["'`]+$/g, '').replace(/\.+$/, '').trim();
+  // Limpa a resposta: remove aspas envolventes e garante ponto final (a
+  // ultima frase precisa fechar - sem isso a contagem de frases do gate cai).
+  const content = pickFinalPrompt(raw_text);
+  if (!content) throw new Error('NVIDIA não retornou conteúdo');
+  const clean = finalizeStyleText(content);
   log(`NVIDIA devolveu estilo: "${clean.slice(0, 60)}"`);
   return clean;
 }
@@ -784,13 +941,13 @@ async function callNvidiaForStyle(options = {}, timeoutMs = 2200) {
 /**
  * Chama DeepSeek para gerar um estilo musical.
  */
-async function callDeepSeekForStyle(options = {}, timeoutMs = 2200) {
+async function callDeepSeekForStyle(options = {}, timeoutMs = 7000) {
   log('pedindo estilo musical ao DeepSeek');
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs); // estilo e rapido
+  const timer = setTimeout(() => controller.abort(), timeoutMs); // rede + corpo, 7s
   let res;
   try {
-    res = await fetch(`${DEEPSEEK.baseURL}/chat/completions`, {
+    res = await fetchWithDeadline(`${DEEPSEEK.baseURL}/chat/completions`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -803,15 +960,14 @@ async function callDeepSeekForStyle(options = {}, timeoutMs = 2200) {
           { role: 'user', content: styleUserPrompt(options) },
         ],
         temperature: 1.1, // alta criatividade
-        max_tokens: 220,
+        max_tokens: 900, // modelos de raciocinio precisam de espaco para pensar
       }),
-      signal: controller.signal,
-    });
+    }, timeoutMs);
   } finally {
     clearTimeout(timer);
   }
 
-  const raw = await res.text();
+  const raw = await readWithDeadline(res, timeoutMs);
   let payload = null;
   try { payload = JSON.parse(raw); } catch { /* tratado abaixo */ }
   if (!res.ok) {
@@ -819,11 +975,13 @@ async function callDeepSeekForStyle(options = {}, timeoutMs = 2200) {
     throw new Error(`DeepSeek respondeu ${res.status}: ${motivo}`);
   }
 
-  const content = String(payload?.choices?.[0]?.message?.content || '').trim();
-  if (!content) throw new Error('DeepSeek não retornou conteúdo');
+  const raw_text = extractStyleText(payload);
+  if (!raw_text) throw new Error('DeepSeek não retornou conteúdo');
 
   // Limpa a resposta
-  const clean = content.replace(/^["'`]+|["'`]+$/g, '').replace(/\.+$/, '').trim();
+  const content = pickFinalPrompt(raw_text);
+  if (!content) throw new Error('DeepSeek não retornou conteúdo');
+  const clean = finalizeStyleText(content);
   log(`DeepSeek devolveu estilo: "${clean.slice(0, 60)}"`);
   return clean;
 }
